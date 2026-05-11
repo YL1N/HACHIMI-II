@@ -1,0 +1,46 @@
+# Local environment
+.cache/
+.claude/
+.conda/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Local runtime configs
+configs/run_local.json
+eedi/configs/run_local.json
+xes/configs/run_local.json
+xes/configs/run_local_9501_qwen.json
+
+# Data and large local assets
+data/
+EEDI_data/
+XES3G5M/
+merged_students_10k.jsonl
+merged_students_250k.jsonl
+
+# External repos / vendored references
+external/
+
+# Experiment outputs
+outputs/
+xes/outputs/
+eedi/outputs/
+
+# Logs and temporary artifacts
+*.log
+tmp_check/
+tmp_*/
+tmp_*.json
+tmp_*.html
+tmp_*.py
+tmp_*.log
+codex_next_step.txt
+
+# OS noise
+.DS_Store
+Thumbs.db

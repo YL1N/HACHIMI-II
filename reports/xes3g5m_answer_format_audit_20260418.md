@@ -1,0 +1,46 @@
+# XES3G5M Answer Format Audit (2026-04-18)
+
+- n_questions: 7652
+- category_counts:
+  - complex_other: 3
+  - equation_like: 12
+  - multi_simple_exact: 1388
+  - option_explicit: 1510
+  - option_implicit: 21
+  - single_comparator_token: 3
+  - single_numeric_token: 4587
+  - single_simple_text_token: 91
+  - symbolic_equation: 24
+  - symbolic_expression: 13
+
+- ambiguous_examples:
+  - qid=246 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$7a+2$$．']
+  - qid=976 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['$$E$$', '$$F$$']
+  - qid=1040 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$a-5$$', '$$2a-5$$']
+  - qid=1041 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$(4m-30)$$', '$$370$$']
+  - qid=1197 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['$$F$$']
+  - qid=1224 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$60{}^\\circ$$', '$$120{}^\\circ$$']
+  - qid=1372 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['$$E$$']
+  - qid=1374 type=填空 category=equation_like reason=equation_like_gold gold=['$$79+966=1045$$']
+  - qid=1775 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$53$$', '$$n\\left( n+1 \\right)+11$$']
+  - qid=2173 type=填空 category=complex_other reason=complex_gold_format gold=['C', '$$3060$$']
+  - qid=2504 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['$$F$$']
+  - qid=2573 type=填空 category=equation_like reason=equation_like_gold gold=['$$-$$', '$$+$$', '$$-$$', '$$-$$', '$$-$$']
+  - qid=2719 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$3m-20$$']
+  - qid=2721 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$a+（3a-2）=30$$']
+  - qid=3102 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['($$6a+6b$$)']
+  - qid=3569 type=填空 category=equation_like reason=equation_like_gold gold=['$$+$$', '$$-$$', '$$+$$']
+  - qid=3787 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$(2a-3)$$']
+  - qid=3803 type=填空 category=equation_like reason=equation_like_gold gold=['$$100-1=99$$（个）']
+  - qid=3804 type=填空 category=equation_like reason=equation_like_gold gold=['$$100-1+1=100$$（个）']
+  - qid=3897 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$72{}^\\circ $$']
+  - qid=4598 type=填空 category=complex_other reason=complex_gold_format gold=['$$\\text{A}$$', '$$20$$', '$$6$$']
+  - qid=4643 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['$$CD、GH$$', '$$EF、AB$$', '$$ED、GF、HA$$', '$$BC$$', '$$3$$']
+  - qid=4953 type=填空 category=equation_like reason=equation_like_gold gold=['$$4\\times 6\\times \\left( 3-2 \\right)=24$$．', '$$4\\times 6\\times \\left( 3-2 \\right)=24$$．', '$$4\\times 6\\times \\left( 3-2 \\right)=24$$．']
+  - qid=4954 type=填空 category=equation_like reason=equation_like_gold gold=['$$3\\div3+3\\div3=2$$', '$$3\\div3+3\\div3=2$$', '$$3\\div3+3\\div3=2$$']
+  - qid=4955 type=填空 category=equation_like reason=equation_like_gold gold=['$$(8-1)\\times5=35$$', '$$(8-1)\\times5=35$$']
+  - qid=4988 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['B或C均可', '$$1600$$']
+  - qid=5068 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['E或F', 'F或E']
+  - qid=5069 type=填空 category=symbolic_equation reason=symbolic_equation_gold gold=['$$(14k+52)$$', '$$122$$']
+  - qid=5181 type=填空 category=symbolic_expression reason=symbolic_expression_gold gold=['$$B$$，$$C$$，$$D$$，$$A$$']
+  - qid=5205 type=填空 category=equation_like reason=equation_like_gold gold=['$$\\times $$', '$$\\times $$', '$$\\div $$', '$$-$$', '$$+$$', '$$\\times $$', '$$+$$', '$$-$$']

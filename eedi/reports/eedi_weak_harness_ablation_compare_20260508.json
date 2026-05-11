@@ -1,0 +1,187 @@
+{
+  "title": "EEDI 弱模型 harness 对比（strong vs 3B vs 7B）",
+  "runs": [
+    {
+      "label": "strong",
+      "run_dir": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_updated_20260429",
+      "detached_summary_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_updated_20260429\\detached_eval_1000\\detached_eval_summary.json",
+      "metrics_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_updated_20260429\\metrics.json",
+      "failure_source_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_updated_20260429\\task_failures_summary_firstpass_100c.json",
+      "n_rows": 956,
+      "correctness_match_rate": 0.6679389312977099,
+      "correctness_match_count": 350,
+      "correctness_eligible_rows": 524,
+      "pred_na": 44,
+      "pred_correct": 291,
+      "pred_incorrect": 189,
+      "same_error_rate": 0.3333333333333333,
+      "error_realization_rate": 0.35135135135135137,
+      "cosine_similarity_mean": 0.1730531935831415,
+      "rougeL_mean": 0.17057998818388057,
+      "n_records": 1000,
+      "n_failures": 96,
+      "failure_rate": 0.096,
+      "retries": 348,
+      "remaining_violations": 234,
+      "response_space_distribution": {},
+      "target_engagement_distribution": {},
+      "response_commitment_distribution": {
+        "avoidant": 231,
+        "committed": 495,
+        "tentative": 274
+      },
+      "response_maturity_distribution": {
+        "fragment_only": 401,
+        "brief_local_explanation": 486,
+        "full_student_level_reasoning": 49,
+        "limited_structured_reasoning": 64
+      },
+      "violation_distribution": {
+        "error_path_discontinuity": 31,
+        "over_mature_response": 212,
+        "over_fast_transition": 4
+      },
+      "top_failure_types": [],
+      "top_failure_messages": []
+    },
+    {
+      "label": "weak-3b",
+      "run_dir": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_3b_20260508",
+      "detached_summary_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_3b_20260508\\detached_eval_1000\\detached_eval_summary.json",
+      "metrics_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_3b_20260508\\metrics.json",
+      "failure_source_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_3b_20260508\\task_failures.jsonl",
+      "n_rows": 926,
+      "correctness_match_rate": 0.5551257253384912,
+      "correctness_match_count": 287,
+      "correctness_eligible_rows": 517,
+      "pred_na": 120,
+      "pred_correct": 223,
+      "pred_incorrect": 174,
+      "same_error_rate": 0.35714285714285715,
+      "error_realization_rate": 0.3783783783783784,
+      "cosine_similarity_mean": 0.1663841581651961,
+      "rougeL_mean": 0.14902222337384657,
+      "n_records": 965,
+      "n_failures": 35,
+      "failure_rate": 0.03626943005181347,
+      "retries": null,
+      "remaining_violations": null,
+      "response_space_distribution": {
+        "brief_acknowledgment": 307,
+        "partial_attempt": 392,
+        "local_explanation": 61,
+        "revision_attempt": 104,
+        "clarification_request": 101
+      },
+      "target_engagement_distribution": {
+        "Passive": 139,
+        "Constructive": 282,
+        "Active": 504,
+        "Interactive": 40
+      },
+      "response_commitment_distribution": {},
+      "response_maturity_distribution": {},
+      "violation_distribution": {},
+      "top_failure_types": [
+        {
+          "name": "ValueError",
+          "count": 34
+        },
+        {
+          "name": "RuntimeError",
+          "count": 1
+        }
+      ],
+      "top_failure_messages": [
+        {
+          "name": "generated weak student turn failed validation after retry: ['pred_turn exceeds max_sentences=1 with sentence_count=2']",
+          "count": 11
+        },
+        {
+          "name": "target_of_intervention must be one of ('misconception', 'missing_step', 'confidence', 'commitment', 'explanation_depth', 'dialogue_flow'), got \"['dialogue_fl...",
+          "count": 9
+        },
+        {
+          "name": "turn_rationale must be a non-empty list",
+          "count": 8
+        },
+        {
+          "name": "target_of_intervention must be one of ('misconception', 'missing_step', 'confidence', 'commitment', 'explanation_depth', 'dialogue_flow'), got \"['confidence'...",
+          "count": 3
+        },
+        {
+          "name": "no JSON object found after one explicit JSON repair retry. first_content='{\\n \"instructional_intent\": \"guide student to recognize the operation Leo applied t...",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "label": "weak-7b",
+      "run_dir": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_7b_20260508",
+      "detached_summary_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_7b_20260508\\detached_eval_1000\\detached_eval_summary.json",
+      "metrics_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_7b_20260508\\metrics.json",
+      "failure_source_path": "D:\\Study\\sii\\MathStudent\\eedi\\outputs\\official_test_1000_weak_qwen2_5_7b_20260508\\task_failures.jsonl",
+      "n_rows": 922,
+      "correctness_match_rate": 0.5714285714285714,
+      "correctness_match_count": 296,
+      "correctness_eligible_rows": 518,
+      "pred_na": 111,
+      "pred_correct": 284,
+      "pred_incorrect": 123,
+      "same_error_rate": 0.4642857142857143,
+      "error_realization_rate": 0.25225225225225223,
+      "cosine_similarity_mean": 0.1554680602067431,
+      "rougeL_mean": 0.15785255425010067,
+      "n_records": 960,
+      "n_failures": 40,
+      "failure_rate": 0.041666666666666664,
+      "retries": null,
+      "remaining_violations": null,
+      "response_space_distribution": {
+        "brief_acknowledgment": 304,
+        "partial_attempt": 406,
+        "revision_attempt": 96,
+        "clarification_request": 98,
+        "local_explanation": 56
+      },
+      "target_engagement_distribution": {
+        "Passive": 145,
+        "Constructive": 263,
+        "Active": 501,
+        "Interactive": 51
+      },
+      "response_commitment_distribution": {},
+      "response_maturity_distribution": {},
+      "violation_distribution": {},
+      "top_failure_types": [
+        {
+          "name": "ValueError",
+          "count": 40
+        }
+      ],
+      "top_failure_messages": [
+        {
+          "name": "generated weak student turn failed validation after retry: ['pred_turn exceeds max_sentences=1 with sentence_count=2']",
+          "count": 19
+        },
+        {
+          "name": "target_of_intervention must be one of ('misconception', 'missing_step', 'confidence', 'commitment', 'explanation_depth', 'dialogue_flow'), got \"['dialogue_fl...",
+          "count": 7
+        },
+        {
+          "name": "uptake_rationale must be a non-empty list",
+          "count": 3
+        },
+        {
+          "name": "generated weak student turn failed validation after retry: ['pred_turn exceeds max_sentences=2 with sentence_count=3']",
+          "count": 3
+        },
+        {
+          "name": "generated weak student turn failed validation after retry: ['pred_turn exceeds max_sentences=2 with sentence_count=4']",
+          "count": 2
+        }
+      ]
+    }
+  ],
+  "baseline_label": "strong"
+}

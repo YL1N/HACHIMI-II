@@ -1,0 +1,136 @@
+{
+  "blueprint_name": "xes_balanced_math_v1_20q",
+  "intended_use": "用于XES静态学生模拟的第一版综合基准卷，不直接用于真实高风险人类考试。",
+  "candidate_pool_requirements": {
+    "require_rasch_calibrated": true,
+    "min_item_response_count": 700,
+    "max_level_share": 0.35
+  },
+  "notes": [
+    "先按内容蓝图组卷，再在模块内控制经验难度。",
+    "当前题池没有人工认知层次标签，所以这一版蓝图只严格控制内容、题型、经验难度、作答支持度和分层平衡。",
+    "为保证平行卷可组性，第一版只使用题池充足且已经Rasch校准的8个模块。"
+  ],
+  "slots": [
+    {
+      "slot_id": 1,
+      "module_name": "拓展思维 / 应用题模块",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 2,
+      "module_name": "拓展思维 / 应用题模块",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 3,
+      "module_name": "拓展思维 / 应用题模块",
+      "difficulty_band": "easy",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 4,
+      "module_name": "拓展思维 / 应用题模块",
+      "difficulty_band": "hard",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 5,
+      "module_name": "拓展思维 / 应用题模块",
+      "difficulty_band": "medium",
+      "question_type": "单选"
+    },
+    {
+      "slot_id": 6,
+      "module_name": "拓展思维 / 应用题模块",
+      "difficulty_band": "hard",
+      "question_type": "单选"
+    },
+    {
+      "slot_id": 7,
+      "module_name": "拓展思维 / 计算模块",
+      "difficulty_band": "easy",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 8,
+      "module_name": "拓展思维 / 计算模块",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 9,
+      "module_name": "拓展思维 / 计算模块",
+      "difficulty_band": "medium",
+      "question_type": "单选"
+    },
+    {
+      "slot_id": 10,
+      "module_name": "拓展思维 / 计算模块",
+      "difficulty_band": "hard",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 11,
+      "module_name": "拓展思维 / 计数模块",
+      "difficulty_band": "easy",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 12,
+      "module_name": "拓展思维 / 计数模块",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 13,
+      "module_name": "拓展思维 / 计数模块",
+      "difficulty_band": "hard",
+      "question_type": "单选"
+    },
+    {
+      "slot_id": 14,
+      "module_name": "拓展思维 / 数论模块",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 15,
+      "module_name": "拓展思维 / 数论模块",
+      "difficulty_band": "hard",
+      "question_type": "单选"
+    },
+    {
+      "slot_id": 16,
+      "module_name": "拓展思维 / 行程模块",
+      "difficulty_band": "easy",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 17,
+      "module_name": "拓展思维 / 行程模块",
+      "difficulty_band": "hard",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 18,
+      "module_name": "拓展思维 / 组合模块",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 19,
+      "module_name": "课内题型 / 综合与实践",
+      "difficulty_band": "medium",
+      "question_type": "填空"
+    },
+    {
+      "slot_id": 20,
+      "module_name": "拓展思维 / 几何模块",
+      "difficulty_band": "medium",
+      "question_type": "单选"
+    }
+  ]
+}
