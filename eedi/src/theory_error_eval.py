@@ -175,6 +175,24 @@ class TheoryErrorCode:
     evidence: list[str]
 
 
+def code_single_student_turn(
+    row: dict[str, Any],
+    student_turn_text: str,
+    llm_client: OpenAICompatClient,
+    turn_label: str = "student_turn",
+) -> TheoryErrorCode:
+    return _code_turn(
+        client=llm_client,
+        row=row,
+        student_turn_text=student_turn_text,
+        turn_label=turn_label,
+    )
+
+
+def theory_error_code_to_dict(code: TheoryErrorCode) -> dict[str, Any]:
+    return _code_to_dict(code)
+
+
 def load_theory_error_rows(input_file: Path, truncate: int = 0) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with input_file.open("r", encoding="utf-8-sig", newline="") as f:
@@ -553,8 +571,10 @@ def _gold_turn_is_officially_incorrect(row: dict[str, Any]) -> bool:
 
 __all__ = [
     "build_theory_error_summary",
+    "code_single_student_turn",
     "evaluate_theory_error_rows",
     "load_theory_error_rows",
+    "theory_error_code_to_dict",
     "write_theory_error_outputs",
     "_gold_turn_is_officially_incorrect",
 ]

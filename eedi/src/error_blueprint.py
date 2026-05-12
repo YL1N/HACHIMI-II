@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
+from .population_calibration import (
+    PopulationCalibrationSummary,
+    population_calibration_summary_to_dict,
+)
 from .prompts import ERROR_BLUEPRINT_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
 from .student_turn_state import InteractionState
@@ -50,6 +54,7 @@ def build_error_blueprint(
     interaction_state: InteractionState,
     transition_prediction: StateTransitionPrediction,
     llm_client: OpenAICompatClient,
+    population_calibration_summary: PopulationCalibrationSummary | None = None,
 ) -> ErrorBlueprint:
     payload = {
         "student_context_profile": asdict(student_context_profile),
@@ -57,6 +62,9 @@ def build_error_blueprint(
         "tutor_turn_profile": asdict(tutor_profile),
         "interaction_state": asdict(interaction_state),
         "state_transition_prediction": asdict(transition_prediction),
+        "population_calibration_summary": population_calibration_summary_to_dict(
+            population_calibration_summary
+        ),
         "theory_decision_cues": {
             "tutor_is_eliciting_local_math_content": _tutor_is_eliciting_local_math_content(
                 tutor_profile

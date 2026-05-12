@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
+from .population_calibration import (
+    PopulationCalibrationSummary,
+    population_calibration_summary_to_dict,
+)
 from .prompts import INTERACTION_STATE_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
 from .tutor_turn_profile import TutorTurnProfile
@@ -72,11 +76,15 @@ def resolve_interaction_state(
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
     llm_client: OpenAICompatClient,
+    population_calibration_summary: PopulationCalibrationSummary | None = None,
 ) -> InteractionState:
     payload = {
         "student_context_profile": asdict(student_context_profile),
         "dialogue_context": asdict(context),
         "tutor_turn_profile": asdict(tutor_profile),
+        "population_calibration_summary": population_calibration_summary_to_dict(
+            population_calibration_summary
+        ),
         "state_definitions": {
             "competence_position": list(COMPETENCE_POSITIONS),
             "misconception_status": list(MISCONCEPTION_STATUSES),

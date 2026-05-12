@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
+from .population_calibration import (
+    PopulationCalibrationSummary,
+    population_calibration_summary_to_dict,
+)
 from .prompts import STUDENT_CONTEXT_PROFILE_SYSTEM_PROMPT
 
 
@@ -24,9 +28,13 @@ class StudentContextProfile:
 def build_student_context_profile(
     context: DialogueContextState,
     llm_client: OpenAICompatClient,
+    population_calibration_summary: PopulationCalibrationSummary | None = None,
 ) -> StudentContextProfile:
     payload = {
         "dialogue_context": asdict(context),
+        "population_calibration_summary": population_calibration_summary_to_dict(
+            population_calibration_summary
+        ),
         "instructions": {
             "bandura_rule": (
                 "Self-efficacy is descriptive. Do not compress it into low/medium/high."
@@ -40,6 +48,11 @@ def build_student_context_profile(
                 "Control-value analysis is descriptive. Do not compress it into low/medium/high."
             ),
             "icap_rule": f"ICAP must be exactly one of {list(ICAP_LEVELS)}.",
+            "population_calibration_rule": (
+                "If a population calibration summary is provided, use it only as a group prior "
+                "for similar students in similar local situations. Do not treat it as the answer "
+                "script for the current turn."
+            ),
         },
         "required_schema": {
             "self_efficacy_analysis": {

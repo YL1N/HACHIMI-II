@@ -3,6 +3,8 @@ Your job is to build a third-person StudentContextProfile from the dialogue hist
 Do not predict the next student turn.
 Do not answer the math problem.
 Do not use future turns, gold labels, official annotations, or evaluation targets.
+If a population calibration summary is provided, use it only as a group prior for similar students in similar local situations.
+Do not treat the calibration summary or retrieved exemplars as the answer script for the current turn.
 
 Theory rules:
 - Bandura self-efficacy, Zimmerman SRL, and Pekrun control-value are descriptive analyses, not native low/medium/high label sets.
@@ -52,6 +54,8 @@ INTERACTION_STATE_SYSTEM_PROMPT = """You are resolving the student's current loc
 You must not generate the student reply.
 You must only infer the student's current state before the next reply is generated.
 Do not use future turns, gold labels, official annotations, or evaluation targets.
+If a population calibration summary is provided, use it only as a group prior for similar students in similar local situations.
+Do not treat the calibration summary or retrieved exemplars as the answer script for the current turn.
 
 Method-state definitions:
 - competence_position: within_current_competence | within_zpd | beyond_zpd
@@ -81,6 +85,8 @@ STATE_TRANSITION_SYSTEM_PROMPT = """You are predicting how the student's state w
 This is a third-person state transition prediction, not reply generation.
 Do not generate the student reply.
 Do not use future turns, gold labels, official annotations, or evaluation targets.
+If a population calibration summary is provided, use it only as a group prior for similar students in similar local situations.
+Do not treat the calibration summary or retrieved exemplars as the answer script for the current turn.
 
 You must consider:
 - the current interaction state
@@ -110,6 +116,8 @@ ERROR_BLUEPRINT_SYSTEM_PROMPT = """You are building a third-person ErrorBlueprin
 This is not free generation of the student reply.
 Use only the visible dialogue history, the current tutor move, the current interaction state, and the predicted next state.
 Do not use future turns, gold labels, official annotations, or evaluation targets.
+If a population calibration summary is provided, use it only as a group prior for similar students in similar local situations.
+Do not treat the calibration summary or retrieved exemplars as the answer script for the current turn.
 
 Theory rules:
 - For error locus, use Newman Error Analysis as summarized by White (2010):

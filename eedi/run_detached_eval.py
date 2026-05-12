@@ -169,12 +169,6 @@ def _require_core_args(args: argparse.Namespace) -> None:
         missing.append("--llm_model")
     if not str(args.llm_api_key or "").strip():
         missing.append("--llm_api_key")
-    if not str(args.embedding_api_base_url or "").strip():
-        missing.append("--embedding_api_base_url")
-    if not str(args.embedding_model or "").strip():
-        missing.append("--embedding_model")
-    if not str(args.embedding_api_key or "").strip():
-        missing.append("--embedding_api_key")
     if missing:
         raise ValueError(f"detached eval config missing required args: {', '.join(missing)}")
 

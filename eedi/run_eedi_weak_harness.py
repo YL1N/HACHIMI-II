@@ -16,6 +16,11 @@ from src.dialogue_context import build_dialogue_context_state
 from src.error_blueprint import build_error_blueprint
 from src.evaluation_eedi import append_jsonl, export_official_eval_csv, write_json
 from src.llm_client import LLMConfig, OpenAICompatClient
+from src.population_calibration import (
+    build_population_calibration_summary,
+    load_population_calibration_bank,
+    population_calibration_summary_to_dict,
+)
 from src.runtime_paths import EEDI_OUTPUTS_DIR, PROJECT_ROOT
 from src.student_model import build_student_context_profile
 from src.tutor_turn_profile import build_tutor_turn_profile
@@ -130,6 +135,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--actor_llm_timeout_s", type=float, default=120.0)
     parser.add_argument("--actor_llm_temperature", type=float, default=0.2)
     parser.add_argument("--actor_llm_max_tokens", type=int, default=512)
+    parser.add_argument("--population_calibration_bank_path", type=str, default="")
+    parser.add_argument("--population_calibration_top_k", type=int, default=0)
     return parser
 
 
@@ -287,6 +294,12 @@ def main() -> None:
         tasks = tasks[: args.max_tasks]
     if not tasks:
         raise ValueError("no EEDI tasks selected for weak harness execution")
+    population_calibration_bank = (
+        load_population_calibration_bank(args.population_calibration_bank_path)
+        if str(args.population_calibration_bank_path or "").strip()
+        and int(args.population_calibration_top_k or 0) > 0
+        else []
+    )
 
     write_json(
         run_dir / "resolved_args.json",
@@ -315,6 +328,8 @@ def main() -> None:
             "actor_llm_timeout_s": args.actor_llm_timeout_s,
             "actor_llm_temperature": args.actor_llm_temperature,
             "actor_llm_max_tokens": args.actor_llm_max_tokens,
+            "population_calibration_bank_path": args.population_calibration_bank_path,
+            "population_calibration_top_k": args.population_calibration_top_k,
         },
     )
     _write_progress(
@@ -358,6 +373,8 @@ def main() -> None:
                 actor_llm_config=actor_llm_config,
                 ablation_mode=args.ablation_mode,
                 architecture_version=args.architecture_version,
+                population_calibration_bank=population_calibration_bank,
+                population_calibration_top_k=int(args.population_calibration_top_k or 0),
                 retry_events_path=retry_events_path,
                 output_lock=output_lock,
             )
@@ -405,6 +422,8 @@ def main() -> None:
                             actor_llm_config,
                             args.ablation_mode,
                             args.architecture_version,
+                            population_calibration_bank,
+                            int(args.population_calibration_top_k or 0),
                             retry_events_path,
                             output_lock,
                         )
@@ -456,6 +475,8 @@ def _execute_turn_prediction_task_until_success(
     actor_llm_config: LLMConfig,
     ablation_mode: str,
     architecture_version: str,
+    population_calibration_bank,
+    population_calibration_top_k: int,
     retry_events_path: Path,
     output_lock: threading.Lock,
 ) -> dict[str, object]:
@@ -470,6 +491,8 @@ def _execute_turn_prediction_task_until_success(
                 actor_llm_config=actor_llm_config,
                 ablation_mode=ablation_mode,
                 architecture_version=architecture_version,
+                population_calibration_bank=population_calibration_bank,
+                population_calibration_top_k=population_calibration_top_k,
             )
             task_result["record"]["task_retry_attempts"] = attempt
             return task_result
@@ -498,20 +521,32 @@ def _execute_turn_prediction_task(
     actor_llm_config: LLMConfig,
     ablation_mode: str,
     architecture_version: str,
+    population_calibration_bank,
+    population_calibration_top_k: int,
 ) -> dict[str, object]:
     compiler_llm_client = OpenAICompatClient(compiler_llm_config)
     actor_llm_client = OpenAICompatClient(actor_llm_config)
     context = build_dialogue_context_state(task)
-    student_context_profile = build_student_context_profile(
-        context=context,
-        llm_client=compiler_llm_client,
-    )
     tutor_turn_profile = build_tutor_turn_profile(
         context=context,
         llm_client=compiler_llm_client,
     )
+    population_calibration_summary = build_population_calibration_summary(
+        context=context,
+        tutor_profile=tutor_turn_profile,
+        exemplar_bank=population_calibration_bank,
+        top_k=population_calibration_top_k,
+    )
+    student_context_profile = build_student_context_profile(
+        context=context,
+        llm_client=compiler_llm_client,
+        population_calibration_summary=population_calibration_summary,
+    )
     visible_context = build_visible_context(context)
-    student_prior = build_student_prior(student_context_profile)
+    student_prior = build_student_prior(
+        student_context_profile,
+        population_calibration_summary=population_calibration_summary,
+    )
     tutor_move = build_tutor_move(tutor_turn_profile)
     learning_access_state = resolve_learning_access_state(
         visible_context=visible_context,
@@ -856,6 +891,7 @@ def _execute_turn_prediction_task(
             support_uptake,
         ),
         llm_client=compiler_llm_client,
+        population_calibration_summary=population_calibration_summary,
     )
     strong_error_state = error_blueprint_to_local_error_state(strong_error_blueprint)
     learning_state_update = update_learning_state(
@@ -882,6 +918,9 @@ def _execute_turn_prediction_task(
         "validation": asdict(generated_turn.validation),
         "student_context_profile": asdict(student_context_profile),
         "tutor_turn_profile": asdict(tutor_turn_profile),
+        "population_calibration_summary": population_calibration_summary_to_dict(
+            population_calibration_summary
+        ),
         "visible_context": asdict(visible_context),
         "student_prior": asdict(student_prior),
         "tutor_move": asdict(tutor_move),
@@ -933,6 +972,11 @@ def _execute_turn_prediction_task(
         "architecture_version": architecture_version,
     }
     trace_rows = [
+        _build_trace_row(
+            task,
+            "population_calibration_summary",
+            population_calibration_summary_to_dict(population_calibration_summary),
+        ),
         _build_trace_row(task, "student_context_profile", asdict(student_context_profile)),
         _build_trace_row(task, "tutor_turn_profile", asdict(tutor_turn_profile)),
         _build_trace_row(task, "visible_context", asdict(visible_context)),

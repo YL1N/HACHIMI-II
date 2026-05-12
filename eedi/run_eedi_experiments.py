@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 import traceback
 from dataclasses import asdict
 from datetime import datetime
@@ -23,6 +25,11 @@ from src.evaluation_eedi import (
 )
 from src.generation import generate_student_turn
 from src.llm_client import LLMConfig, OpenAICompatClient
+from src.population_calibration import (
+    build_population_calibration_summary,
+    load_population_calibration_bank,
+    population_calibration_summary_to_dict,
+)
 from src.runtime_paths import EEDI_OUTPUTS_DIR, EEDI_REPORTS_DIR, PROJECT_ROOT
 from src.student_model import build_student_context_profile
 from src.student_turn_state import resolve_interaction_state
@@ -93,16 +100,35 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--official_evaluations",
         type=str,
-        default="sim-text,sim-corr-errs",
+        default="sim-corr-errs",
         help=(
             "Comma-separated official eval names to run after generation. "
-            "Default is the no-training subset: sim-text,sim-corr-errs."
+            "Default is the theory-focused subset: sim-corr-errs."
         ),
     )
     parser.add_argument(
         "--skip_official_eval",
         action="store_true",
         help="Skip automatic official evaluation after generation.",
+    )
+    parser.add_argument("--population_calibration_bank_path", type=str, default="")
+    parser.add_argument("--population_calibration_top_k", type=int, default=0)
+    parser.add_argument(
+        "--retry_until_success",
+        action="store_true",
+        help="Retry failed generation tasks until they succeed.",
+    )
+    parser.add_argument(
+        "--retry_sleep_s",
+        type=float,
+        default=0.5,
+        help="Sleep interval between task retry attempts when retry_until_success is enabled.",
+    )
+    parser.add_argument(
+        "--max_retry_attempts",
+        type=int,
+        default=0,
+        help="Maximum retry attempts per task when retry_until_success is enabled. 0 means no limit.",
     )
     return parser
 
@@ -253,10 +279,18 @@ def main() -> None:
         tasks = tasks[: args.max_tasks]
     if not tasks:
         raise ValueError("no EEDI tasks selected for execution")
+    population_calibration_bank = (
+        load_population_calibration_bank(args.population_calibration_bank_path)
+        if str(args.population_calibration_bank_path or "").strip()
+        and int(args.population_calibration_top_k or 0) > 0
+        else []
+    )
 
     trace_path = run_dir / "stage_traces.jsonl"
     predictions_path = run_dir / "predictions.jsonl"
     failures_path = run_dir / "task_failures.jsonl"
+    retry_events_path = run_dir / "task_retry_events.jsonl"
+    output_lock = threading.Lock()
     records = _load_existing_records(predictions_path)
     failures = _load_existing_failures(failures_path)
     completed_keys = {
@@ -301,6 +335,11 @@ def main() -> None:
             "embedding_retry_sleep_s": args.embedding_retry_sleep_s,
             "official_evaluations": args.official_evaluations,
             "official_eval_input": None,
+            "population_calibration_bank_path": args.population_calibration_bank_path,
+            "population_calibration_top_k": args.population_calibration_top_k,
+            "retry_until_success": args.retry_until_success,
+            "retry_sleep_s": args.retry_sleep_s,
+            "max_retry_attempts": args.max_retry_attempts,
         },
     )
 
@@ -325,7 +364,24 @@ def main() -> None:
         if args.effective_generation_concurrency <= 1:
             for task in pending_tasks:
                 try:
-                    task_result = _execute_turn_prediction_task(task, llm_config)
+                    if args.retry_until_success:
+                        task_result = _execute_turn_prediction_task_until_success(
+                            task=task,
+                            llm_config=llm_config,
+                            population_calibration_bank=population_calibration_bank,
+                            population_calibration_top_k=int(args.population_calibration_top_k or 0),
+                            retry_events_path=retry_events_path,
+                            retry_sleep_s=float(args.retry_sleep_s),
+                            max_retry_attempts=int(args.max_retry_attempts or 0),
+                            output_lock=output_lock,
+                        )
+                    else:
+                        task_result = _execute_turn_prediction_task(
+                            task,
+                            llm_config,
+                            population_calibration_bank,
+                            int(args.population_calibration_top_k or 0),
+                        )
                     task_result["record"]["gt_turn"] = ground_truth_by_key[task_result["task_key"]]
                 except Exception as exc:
                     _persist_task_failure(
@@ -355,9 +411,27 @@ def main() -> None:
             futures: dict[concurrent.futures.Future[dict[str, object]], object] = {}
             try:
                 for task in pending_tasks:
-                    futures[
-                        executor.submit(_execute_turn_prediction_task, task, llm_config)
-                    ] = task
+                    if args.retry_until_success:
+                        future = executor.submit(
+                            _execute_turn_prediction_task_until_success,
+                            task,
+                            llm_config,
+                            population_calibration_bank,
+                            int(args.population_calibration_top_k or 0),
+                            retry_events_path,
+                            float(args.retry_sleep_s),
+                            int(args.max_retry_attempts or 0),
+                            output_lock,
+                        )
+                    else:
+                        future = executor.submit(
+                            _execute_turn_prediction_task,
+                            task,
+                            llm_config,
+                            population_calibration_bank,
+                            int(args.population_calibration_top_k or 0),
+                        )
+                    futures[future] = task
                 for future in concurrent.futures.as_completed(futures):
                     task = futures[future]
                     try:
@@ -438,6 +512,11 @@ def main() -> None:
             "official_evaluations": args.official_evaluations,
             "official_eval_input": str(official_eval_input) if official_eval_input else None,
             "skip_official_eval": args.skip_official_eval,
+            "population_calibration_bank_path": args.population_calibration_bank_path,
+            "population_calibration_top_k": args.population_calibration_top_k,
+            "retry_until_success": args.retry_until_success,
+            "retry_sleep_s": args.retry_sleep_s,
+            "max_retry_attempts": args.max_retry_attempts,
         },
     )
     if official_eval_input and not args.skip_official_eval:
@@ -461,19 +540,29 @@ def main() -> None:
 def _execute_turn_prediction_task(
     task,
     llm_config: LLMConfig,
+    population_calibration_bank,
+    population_calibration_top_k: int,
 ) -> dict[str, object]:
     llm_client = OpenAICompatClient(llm_config)
     context = build_dialogue_context_state(task)
+    tutor_profile = build_tutor_turn_profile(context=context, llm_client=llm_client)
+    population_calibration_summary = build_population_calibration_summary(
+        context=context,
+        tutor_profile=tutor_profile,
+        exemplar_bank=population_calibration_bank,
+        top_k=population_calibration_top_k,
+    )
     student_context_profile = build_student_context_profile(
         context=context,
         llm_client=llm_client,
+        population_calibration_summary=population_calibration_summary,
     )
-    tutor_profile = build_tutor_turn_profile(context=context, llm_client=llm_client)
     interaction_state = resolve_interaction_state(
         student_context_profile=student_context_profile,
         context=context,
         tutor_profile=tutor_profile,
         llm_client=llm_client,
+        population_calibration_summary=population_calibration_summary,
     )
     transition_prediction = predict_state_transition(
         student_context_profile=student_context_profile,
@@ -481,6 +570,7 @@ def _execute_turn_prediction_task(
         tutor_profile=tutor_profile,
         interaction_state=interaction_state,
         llm_client=llm_client,
+        population_calibration_summary=population_calibration_summary,
     )
     error_blueprint = build_error_blueprint(
         student_context_profile=student_context_profile,
@@ -489,6 +579,7 @@ def _execute_turn_prediction_task(
         interaction_state=interaction_state,
         transition_prediction=transition_prediction,
         llm_client=llm_client,
+        population_calibration_summary=population_calibration_summary,
     )
     constraint_bundle = compile_constraints(
         prediction=transition_prediction,
@@ -505,6 +596,11 @@ def _execute_turn_prediction_task(
         llm_client=llm_client,
     )
     trace_rows = [
+        _build_trace_row(
+            task=task,
+            stage="population_calibration_summary",
+            payload=population_calibration_summary_to_dict(population_calibration_summary),
+        ),
         _build_trace_row(
             task=task,
             stage="student_context_profile",
@@ -573,6 +669,9 @@ def _execute_turn_prediction_task(
         "student_context_profile": asdict(student_context_profile),
         "dialogue_context": asdict(context),
         "tutor_turn_profile": asdict(tutor_profile),
+        "population_calibration_summary": population_calibration_summary_to_dict(
+            population_calibration_summary
+        ),
         "interaction_state": asdict(interaction_state),
         "state_transition_prediction": asdict(transition_prediction),
         "error_blueprint": asdict(error_blueprint),
@@ -595,6 +694,51 @@ def _execute_turn_prediction_task(
         "trace_rows": trace_rows,
         "record": record,
     }
+
+
+def _execute_turn_prediction_task_until_success(
+    task,
+    llm_config: LLMConfig,
+    population_calibration_bank,
+    population_calibration_top_k: int,
+    retry_events_path: Path,
+    retry_sleep_s: float,
+    max_retry_attempts: int,
+    output_lock: threading.Lock,
+) -> dict[str, object]:
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            task_result = _execute_turn_prediction_task(
+                task=task,
+                llm_config=llm_config,
+                population_calibration_bank=population_calibration_bank,
+                population_calibration_top_k=population_calibration_top_k,
+            )
+            task_result["record"]["task_retry_attempts"] = attempt
+            return task_result
+        except Exception as exc:
+            with output_lock:
+                append_jsonl(
+                    retry_events_path,
+                    {
+                        "dialogue_id": task.dialogue_id,
+                        "turn_idx": task.target_turn_index,
+                        "question_id": task.question_id,
+                        "intervention_id": task.intervention_id,
+                        "attempt": attempt,
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    },
+                )
+            if max_retry_attempts > 0 and attempt >= max_retry_attempts:
+                raise RuntimeError(
+                    f"task exceeded max_retry_attempts={max_retry_attempts} after "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+            if retry_sleep_s > 0:
+                time.sleep(retry_sleep_s)
 
 
 def _build_trace_row(task, stage: str, payload: object) -> dict[str, object]:

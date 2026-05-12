@@ -12,6 +12,10 @@ if str(EEDI_DIR) not in sys.path:
 from src.data_loading import DialogueTurn, TurnPredictionTask
 from src.dialogue_context import build_dialogue_context_state
 from src.evaluation_eedi import append_jsonl, write_json
+from src.population_calibration import (
+    PopulationCalibrationExemplar,
+    build_population_calibration_summary,
+)
 from src.runtime_paths import EEDI_OUTPUTS_DIR
 from src.student_model import build_student_context_profile
 from src.tutor_turn_profile import build_tutor_turn_profile
@@ -228,10 +232,72 @@ def main() -> None:
     ground_truth_student_turn = "Maybe the smaller one?"
 
     context = build_dialogue_context_state(task)
-    student_context_profile = build_student_context_profile(context, compiler_llm_client)
     tutor_turn_profile = build_tutor_turn_profile(context, compiler_llm_client)
+    population_calibration_summary = build_population_calibration_summary(
+        context=context,
+        tutor_profile=tutor_turn_profile,
+        exemplar_bank=[
+            PopulationCalibrationExemplar(
+                dialogue_id="cal_1",
+                question_id="q_cal_1",
+                intervention_id="i_cal_1",
+                turn_idx=4,
+                subjects=[("Fractions", 2)],
+                history_turn_count=3,
+                latest_tutor_turn="Which part are we supposed to compare?",
+                last_student_turn="I am not sure which part matters.",
+                tutor_profile={
+                    "support_type": "conceptual_hint",
+                    "elicited_response_process": "interpret_evaluate",
+                    "elicited_response_target_type": "explanation_or_judgment",
+                    "target_of_intervention": "misconception",
+                    "elicited_object_description": "which visual part should count for the answer",
+                },
+                has_codable_math_error=True,
+                knowledge_type="conceptual",
+                error_locus="transformation",
+                error_mechanism="incorrect_associations",
+                error_evidence=["The student compares the wrong visual quantity."],
+            ),
+            PopulationCalibrationExemplar(
+                dialogue_id="cal_2",
+                question_id="q_cal_2",
+                intervention_id="i_cal_2",
+                turn_idx=6,
+                subjects=[("Fractions", 2)],
+                history_turn_count=5,
+                latest_tutor_turn="Which part should we use here?",
+                last_student_turn="maybe that one",
+                tutor_profile={
+                    "support_type": "conceptual_hint",
+                    "elicited_response_process": "interpret_evaluate",
+                    "elicited_response_target_type": "explanation_or_judgment",
+                    "target_of_intervention": "misconception",
+                    "elicited_object_description": "which visual part should count for the answer",
+                },
+                has_codable_math_error=False,
+                knowledge_type=None,
+                error_locus=None,
+                error_mechanism=None,
+                error_evidence=["The student stays local and tentative under tutor guidance."],
+            ),
+        ],
+        top_k=2,
+    )
+    if population_calibration_summary is None:
+        raise AssertionError("population_calibration_summary should not be None")
+    student_context_profile = build_student_context_profile(
+        context,
+        compiler_llm_client,
+        population_calibration_summary=population_calibration_summary,
+    )
     visible_context = build_visible_context(context)
-    student_prior = build_student_prior(student_context_profile)
+    student_prior = build_student_prior(
+        student_context_profile,
+        population_calibration_summary=population_calibration_summary,
+    )
+    assert student_prior.population_calibration_prior
+    assert student_prior.population_calibration_cautions
     tutor_move = build_tutor_move(tutor_turn_profile)
     learning_access_state = resolve_learning_access_state(
         visible_context=visible_context,
@@ -347,6 +413,7 @@ def main() -> None:
         "validation": asdict(generated_turn.validation),
         "student_context_profile": asdict(student_context_profile),
         "tutor_turn_profile": asdict(tutor_turn_profile),
+        "population_calibration_summary": asdict(population_calibration_summary),
         "visible_context": asdict(visible_context),
         "student_prior": asdict(student_prior),
         "tutor_move": asdict(tutor_move),

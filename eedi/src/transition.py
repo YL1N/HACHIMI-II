@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass, replace
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
+from .population_calibration import (
+    PopulationCalibrationSummary,
+    population_calibration_summary_to_dict,
+)
 from .prompts import STATE_TRANSITION_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
 from .student_turn_state import (
@@ -50,12 +54,16 @@ def predict_state_transition(
     tutor_profile: TutorTurnProfile,
     interaction_state: InteractionState,
     llm_client: OpenAICompatClient,
+    population_calibration_summary: PopulationCalibrationSummary | None = None,
 ) -> StateTransitionPrediction:
     payload = {
         "student_context_profile": asdict(student_context_profile),
         "dialogue_context": asdict(context),
         "tutor_turn_profile": asdict(tutor_profile),
         "interaction_state": asdict(interaction_state),
+        "population_calibration_summary": population_calibration_summary_to_dict(
+            population_calibration_summary
+        ),
         "required_schema": {
             "predicted_next_competence_position": list(COMPETENCE_POSITIONS),
             "predicted_next_misconception_status": list(MISCONCEPTION_STATUSES),

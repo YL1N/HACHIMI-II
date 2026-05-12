@@ -11,6 +11,7 @@ from .error_blueprint import (
     RADATZ_ERROR_MECHANISMS,
 )
 from .llm_client import OpenAICompatClient, require_keys
+from .population_calibration import PopulationCalibrationSummary
 from .prompts import (
     LEARNING_ACCESS_STATE_SYSTEM_PROMPT,
     LEARNING_STATE_UPDATE_SYSTEM_PROMPT,
@@ -141,6 +142,8 @@ class StudentPrior:
     control_value_description: str
     engagement_tendency: str
     response_style_description: str
+    population_calibration_prior: list[str]
+    population_calibration_cautions: list[str]
     prior_evidence: list[str]
 
 
@@ -275,7 +278,10 @@ def build_visible_context(context: DialogueContextState) -> VisibleContext:
     )
 
 
-def build_student_prior(profile: StudentContextProfile) -> StudentPrior:
+def build_student_prior(
+    profile: StudentContextProfile,
+    population_calibration_summary: PopulationCalibrationSummary | None = None,
+) -> StudentPrior:
     control_text = (
         f"{profile.control_value_analysis['control_appraisal_description']} "
         f"{profile.control_value_analysis['value_appraisal_description']}"
@@ -286,6 +292,16 @@ def build_student_prior(profile: StudentContextProfile) -> StudentPrior:
         + list(profile.control_value_analysis["control_value_evidence"])
         + list(profile.engagement_tendency_analysis["engagement_evidence"])
         + list(profile.response_style_analysis["response_directness_evidence"])
+    )
+    population_calibration_prior = (
+        list(population_calibration_summary.prior_summary_lines)
+        if population_calibration_summary is not None
+        else []
+    )
+    population_calibration_cautions = (
+        list(population_calibration_summary.caution_lines)
+        if population_calibration_summary is not None
+        else []
     )
     return StudentPrior(
         self_efficacy_description=str(
@@ -301,6 +317,12 @@ def build_student_prior(profile: StudentContextProfile) -> StudentPrior:
         response_style_description=str(
             profile.response_style_analysis["response_directness_description"]
         ).strip(),
+        population_calibration_prior=[
+            item for item in population_calibration_prior if str(item).strip()
+        ],
+        population_calibration_cautions=[
+            item for item in population_calibration_cautions if str(item).strip()
+        ],
         prior_evidence=[item for item in prior_evidence if str(item).strip()],
     )
 
@@ -775,6 +797,7 @@ def compile_teaching_support_packet(
             "Persistent obstacle is "
             f"{learning_access_state.persistent_obstacle}; "
             f"prior evidence count is {len(student_prior.prior_evidence)}; "
+            f"population calibration prior count is {len(student_prior.population_calibration_prior)}; "
             f"history turns available are {visible_context.turn_count_so_far}."
         ),
     ]
@@ -1060,6 +1083,13 @@ def _build_realization_requirements(
             "Keep the wording compatible with the student's response style: "
             f"{student_prior.response_style_description}."
         )
+    if student_prior.population_calibration_prior:
+        requirements.append(
+            "Treat the population calibration summary only as a weak group prior for similar students: "
+            f"{student_prior.population_calibration_prior[0]}"
+        )
+    if student_prior.population_calibration_cautions:
+        requirements.append(student_prior.population_calibration_cautions[0])
     return requirements
 
 

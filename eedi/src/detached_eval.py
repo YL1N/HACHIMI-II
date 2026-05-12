@@ -128,25 +128,37 @@ def run_detached_eval(
     if not rows:
         raise ValueError("no rows loaded from input_file")
 
+    should_compute_text_similarity = bool(
+        str(embedding_base_url or "").strip()
+        and str(embedding_model or "").strip()
+        and str(embedding_api_key or "").strip()
+    )
+
     with ThreadPoolExecutor(max_workers=2) as executor:
-        text_future = executor.submit(
-            compute_text_similarity,
-            rows=rows,
-            embedding_base_url=embedding_base_url,
-            embedding_model=embedding_model,
-            embedding_api_key=embedding_api_key,
-            embedding_batch_size=embedding_batch_size,
-            embedding_timeout_s=embedding_timeout_s,
-            embedding_max_retries=embedding_max_retries,
-            embedding_retry_sleep_s=embedding_retry_sleep_s,
-        )
+        text_future = None
+        if should_compute_text_similarity:
+            text_future = executor.submit(
+                compute_text_similarity,
+                rows=rows,
+                embedding_base_url=embedding_base_url,
+                embedding_model=embedding_model,
+                embedding_api_key=embedding_api_key,
+                embedding_batch_size=embedding_batch_size,
+                embedding_timeout_s=embedding_timeout_s,
+                embedding_max_retries=embedding_max_retries,
+                embedding_retry_sleep_s=embedding_retry_sleep_s,
+            )
         correctness_future = executor.submit(
             evaluate_official_correctness,
             rows=rows,
             llm_config=llm_config,
             max_concurrency=max_concurrency,
         )
-        text_scores = text_future.result()
+        text_scores = (
+            text_future.result()
+            if text_future is not None
+            else build_empty_text_similarity(rows)
+        )
         correctness_records = correctness_future.result()
     theory_rows = [row for row in rows if _gold_turn_is_officially_incorrect(row)]
     theory_records = evaluate_theory_error_rows(
@@ -168,6 +180,18 @@ def run_detached_eval(
         summary=summary,
     )
     return summary
+
+
+def build_empty_text_similarity(
+    rows: list[dict[str, Any]],
+) -> dict[str, dict[str, float | None]]:
+    return {
+        _row_uid(row): {
+            "rougeL": None,
+            "cosine_similarity": None,
+        }
+        for row in rows
+    }
 
 
 def compute_text_similarity(
@@ -318,8 +342,16 @@ def build_detached_eval_records(
 
 
 def build_detached_eval_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
-    rouge_values = [float(row["rougeL"]) for row in records]
-    cos_values = [float(row["cosine_similarity"]) for row in records]
+    rouge_values = [
+        float(row["rougeL"])
+        for row in records
+        if row.get("rougeL") is not None
+    ]
+    cos_values = [
+        float(row["cosine_similarity"])
+        for row in records
+        if row.get("cosine_similarity") is not None
+    ]
 
     correctness_rows = [
         row for row in records if row["official_correctness_match"] is not None
