@@ -227,6 +227,50 @@
 
 ---
 
+### 6.1 给项目组成员的默认运行配置
+
+为了避免后续协作时大家被消融开关绕晕，这里把当前 XES strong harness 最终版的默认配置固定下来。
+
+如果目标是复现或继续推进当前主线，请使用下面这一组配置：
+
+| 开关 | 最终版取值 | 含义 |
+|---|---|---|
+| `method_variant` | `state_step` | 保留第三人称状态链，并按步骤生成学生答案 |
+| `response_persona` | `first` | 最终回答仍以学生第一人称输出 |
+| `enable_difficulty_anchor_context` | `false` | 不再向模型暴露 difficulty anchor 对照信息 |
+| `enable_real_difficulty_band` | `false` | 不再直接告诉模型真实难度档位 |
+| `constraint_mode` | `loose` | 使用更松的生成边界，避免 strict constraints 过紧 |
+| `interaction_decision_mode` | `full` | 保留 `StudentItemInteractionDecision`，不能关 |
+| `item_state_fields_mode` | `full` | 保留完整 `ItemResponseState`，不能只留标签 |
+| `student_model_fields_mode` | `full` | 保留完整 `StudentModel` |
+| `problem_profile_fields_mode` | `full` | 保留完整 `ProblemRequirementProfile` |
+| `internal_signals_mode` | `full` | 默认仍生成 internal signals，但它不是核心必要模块 |
+| `violation_retry_mode` | `off` | 当前最终版不依赖 violation retry 做后处理 |
+| `max_thinking_steps` | `12` | 保持当前 state-step 预算 |
+
+也就是说，协作成员不要默认跟进那些名字里带 `no_internal_signals`、`student_capability_only`、`problem_core_only`、`no_interaction_decision`、`item_state_label_only` 的消融版本。那些版本只用于证明模块必要性，不是当前主线。
+
+当前主线的命令形态应当是：
+
+```powershell
+python xes/run_student_conditioned_benchmark.py `
+  --method_variant state_step `
+  --response_persona first `
+  --constraint_mode loose `
+  --internal_signals_mode full `
+  --student_model_fields_mode full `
+  --problem_profile_fields_mode full `
+  --interaction_decision_mode full `
+  --item_state_fields_mode full `
+  --violation_retry_mode off `
+  --no-enable_difficulty_anchor_context `
+  --no-enable_real_difficulty_band
+```
+
+如果只想记一句话，就是：
+
+> XES 当前最终源码版本 = `state_step + Hachimi + no difficulty signal + full state objects + loose constraints`。
+
 ## 7. 为什么最终版本不是旧 baseline
 
 需要单独说明一下。
