@@ -5,7 +5,7 @@ import json
 import math
 import random
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -27,11 +27,17 @@ from .evaluation import (
     _spearman_corr,
     apply_official_correctness_labels,
 )
-from .generation import generate_student_answer, generate_student_answer_direct
+from .generation import (
+    check_violation,
+    generate_student_answer,
+    generate_student_answer_direct,
+    retry_with_tighter_constraints,
+    should_retry_once,
+)
 from .irt_support import _band_students
 from .llm_client import OpenAICompatClient
 from .problem_profile import ProblemRequirementProfile, build_problem_requirement_profile
-from .response_state import compile_constraints, resolve_item_response_state
+from .response_state import ConstraintBundle, ItemResponseState, compile_constraints, resolve_item_response_state
 from .runtime_paths import XES_OUTPUTS_DIR
 from .student_item_interaction import build_student_item_interaction_decision
 from .student_model import StudentInternalSignals, StudentModel, build_student_model, map_student_model_to_internal_signals
@@ -57,7 +63,15 @@ class BenchmarkSettings:
     method_variant: str = "state_step"
     response_persona: str = "first"
     max_thinking_steps: int = 12
-    enable_difficulty_anchor_context: bool = True
+    enable_difficulty_anchor_context: bool = False
+    enable_real_difficulty_band: bool = False
+    internal_signals_mode: str = "full"
+    student_model_fields_mode: str = "full"
+    problem_profile_fields_mode: str = "full"
+    interaction_decision_mode: str = "full"
+    item_state_fields_mode: str = "full"
+    constraint_mode: str = "full"
+    violation_retry_mode: str = "off"
     persona_source_mode: str = "xes_history_plus_hachimi"
     fixed_cohort_path: str | None = None
 
@@ -89,6 +103,159 @@ class BenchmarkStudent:
     matched_persona_id: str
     matched_persona_score: float
     enhanced_persona: PersonaRecord
+
+
+def _neutral_text(label: str) -> str:
+    return f"ablated_{label}_field"
+
+
+def ablate_student_model_fields(
+    student_model: StudentModel,
+    mode: str,
+) -> StudentModel:
+    if mode == "full":
+        return student_model
+    if mode not in {"capability_only", "no_psych_fields", "no_style_fields"}:
+        raise ValueError(f"unknown student_model_fields_mode: {mode}")
+
+    output = student_model
+    if mode in {"capability_only", "no_psych_fields"}:
+        output = replace(
+            output,
+            self_efficacy_analysis=replace(
+                output.self_efficacy_analysis,
+                efficacy_belief_description=_neutral_text("self_efficacy"),
+                efficacy_belief_evidence=[_neutral_text("self_efficacy_evidence")],
+            ),
+            srl_analysis=replace(
+                output.srl_analysis,
+                primary_srl_vulnerability=_neutral_text("srl"),
+                srl_process_evidence=[_neutral_text("srl_evidence")],
+            ),
+            control_value_analysis=replace(
+                output.control_value_analysis,
+                control_appraisal_description=_neutral_text("control"),
+                value_appraisal_description=_neutral_text("value"),
+                control_value_evidence=[_neutral_text("control_value_evidence")],
+            ),
+        )
+    if mode in {"capability_only", "no_style_fields"}:
+        output = replace(
+            output,
+            engagement_level_tendency="Active",
+            engagement_evidence=[_neutral_text("engagement_evidence")],
+            response_directness_description=_neutral_text("response_directness"),
+            response_directness_evidence=[_neutral_text("response_directness_evidence")],
+        )
+    if mode == "capability_only":
+        output = replace(
+            output,
+            weak_subjects=["ablated_weak_subject"],
+            strong_subjects=["ablated_strong_subject"],
+            raw_summary=_neutral_text("raw_summary"),
+            math_anchor_profile_summary="",
+            math_anchor_profile_evidence=[],
+        )
+    return output
+
+
+def ablate_problem_profile_fields(
+    profile: ProblemRequirementProfile,
+    mode: str,
+) -> ProblemRequirementProfile:
+    if mode == "full":
+        return profile
+    if mode == "no_problem_justifications":
+        return ProblemRequirementProfile(
+            prerequisite_knowledge=profile.prerequisite_knowledge,
+            operation_complexity=profile.operation_complexity,
+            operation_complexity_justification=_neutral_text("operation_justification"),
+            abstraction_level=profile.abstraction_level,
+            abstraction_level_justification=_neutral_text("abstraction_justification"),
+            knowledge_integration_demand=profile.knowledge_integration_demand,
+            representation_shift_required=profile.representation_shift_required,
+            response_format_demand=profile.response_format_demand,
+            guessability=profile.guessability,
+            notes=profile.notes,
+            perceived_difficulty_for_target_grade=profile.perceived_difficulty_for_target_grade,
+            perceived_difficulty_justification=profile.perceived_difficulty_justification,
+            real_difficulty_band=profile.real_difficulty_band,
+            difficulty_anchor_context=profile.difficulty_anchor_context,
+        )
+    if mode == "no_problem_notes":
+        return ProblemRequirementProfile(
+            prerequisite_knowledge=profile.prerequisite_knowledge,
+            operation_complexity=profile.operation_complexity,
+            operation_complexity_justification=profile.operation_complexity_justification,
+            abstraction_level=profile.abstraction_level,
+            abstraction_level_justification=profile.abstraction_level_justification,
+            knowledge_integration_demand=profile.knowledge_integration_demand,
+            representation_shift_required=profile.representation_shift_required,
+            response_format_demand=profile.response_format_demand,
+            guessability=profile.guessability,
+            notes=[],
+            perceived_difficulty_for_target_grade=profile.perceived_difficulty_for_target_grade,
+            perceived_difficulty_justification=profile.perceived_difficulty_justification,
+            real_difficulty_band=profile.real_difficulty_band,
+            difficulty_anchor_context=profile.difficulty_anchor_context,
+        )
+    if mode == "problem_core_only":
+        return ProblemRequirementProfile(
+            prerequisite_knowledge=profile.prerequisite_knowledge,
+            operation_complexity=profile.operation_complexity,
+            operation_complexity_justification=_neutral_text("operation_justification"),
+            abstraction_level=profile.abstraction_level,
+            abstraction_level_justification=_neutral_text("abstraction_justification"),
+            knowledge_integration_demand="single_knowledge",
+            representation_shift_required="none",
+            response_format_demand=profile.response_format_demand,
+            guessability=profile.guessability,
+            notes=[],
+            perceived_difficulty_for_target_grade=profile.perceived_difficulty_for_target_grade,
+            perceived_difficulty_justification=profile.perceived_difficulty_justification,
+            real_difficulty_band=profile.real_difficulty_band,
+            difficulty_anchor_context=profile.difficulty_anchor_context,
+        )
+    raise ValueError(f"unknown problem_profile_fields_mode: {mode}")
+
+
+def ablate_item_state_fields(
+    item_state: ItemResponseState,
+    mode: str,
+) -> ItemResponseState:
+    if mode == "full":
+        return item_state
+    if mode == "state_label_only":
+        return ItemResponseState(
+            prerequisite_familiarity=item_state.prerequisite_familiarity,
+            response_state=item_state.response_state,
+            reachable_level=_neutral_text("reachable_level"),
+            error_path=[],
+            commitment_tendency=item_state.commitment_tendency,
+            explanation_depth_cap=item_state.explanation_depth_cap,
+            response_style_guidance=[],
+        )
+    raise ValueError(f"unknown item_state_fields_mode: {mode}")
+
+
+def ablate_constraint_bundle(
+    constraints: ConstraintBundle,
+    mode: str,
+) -> ConstraintBundle:
+    if mode == "full":
+        return constraints
+    if mode == "loose":
+        return ConstraintBundle(
+            must_commit_answer=True,
+            allow_complete_explanation=True,
+            max_sentences=3,
+            max_thinking_steps=max(1, constraints.max_thinking_steps),
+            forbid_full_mastery=False,
+            preferred_error_path=[],
+            style_constraints=[],
+            allowed_commitment="high",
+        )
+    raise ValueError(f"unknown constraint_mode: {mode}")
 
 
 def _load_json(path: str | Path) -> object:
@@ -1021,10 +1188,13 @@ def build_problem_profiles_for_questions(
     question_lookup: dict[str, QuestionRecord],
     llm_client: OpenAICompatClient,
     enable_difficulty_anchor_context: bool,
+    enable_real_difficulty_band: bool = False,
+    problem_profile_fields_mode: str = "full",
 ) -> dict[str, ProblemRequirementProfile]:
     difficulty_anchor_bank = DifficultyAnchorBank() if enable_difficulty_anchor_context else None
     profiles: dict[str, ProblemRequirementProfile] = {}
     for question in question_lookup.values():
+        real_difficulty_band = question.difficulty_band if enable_real_difficulty_band else None
         difficulty_anchor_context = None
         if difficulty_anchor_bank is not None:
             difficulty_anchor_context = difficulty_anchor_bank.build_context_for_question(
@@ -1032,36 +1202,68 @@ def build_problem_profiles_for_questions(
                 question_type=question.question_type,
                 module_name=question.paper_module_name,
                 paper_b_hat=question.paper_b_hat,
-                real_difficulty_band=question.difficulty_band,
+                real_difficulty_band=real_difficulty_band,
             )
-        profiles[question.question_id] = build_problem_requirement_profile(
+        profile = build_problem_requirement_profile(
             question_text=question.question_text,
             options=question.options,
             question_type=question.question_type,
             llm_client=llm_client,
             enable_difficulty_analysis=False,
-            real_difficulty_band=question.difficulty_band,
+            real_difficulty_band=real_difficulty_band,
             difficulty_anchor_context=difficulty_anchor_context,
+        )
+        profiles[question.question_id] = ablate_problem_profile_fields(
+            profile,
+            problem_profile_fields_mode,
         )
     return profiles
 
 
+def _internal_signals_to_payload(
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
+) -> dict[str, str] | None:
+    if internal_signals is None:
+        return None
+    if isinstance(internal_signals, StudentInternalSignals):
+        return asdict(internal_signals)
+    if isinstance(internal_signals, dict):
+        payload = {str(key): str(value) for key, value in internal_signals.items()}
+        if not payload:
+            raise ValueError("internal_signals dict cannot be empty")
+        return payload
+    raise TypeError(f"unsupported internal_signals type: {type(internal_signals).__name__}")
+
+
 def run_single_prediction(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     question: QuestionRecord,
     problem_profile: ProblemRequirementProfile,
     llm_client: OpenAICompatClient,
     method_variant: str,
     response_persona: str,
     max_thinking_steps: int,
+    interaction_decision_mode: str = "full",
+    item_state_fields_mode: str = "full",
+    constraint_mode: str = "full",
+    violation_retry_mode: str = "off",
 ) -> dict[str, object]:
-    interaction_decision = build_student_item_interaction_decision(
-        student_model=student_model,
-        profile=problem_profile,
-    )
+    if interaction_decision_mode == "full":
+        interaction_decision = build_student_item_interaction_decision(
+            student_model=student_model,
+            profile=problem_profile,
+        )
+    elif interaction_decision_mode == "none":
+        interaction_decision = None
+    else:
+        raise ValueError(f"unknown interaction_decision_mode: {interaction_decision_mode}")
     item_state = None
     constraints = None
+    initial_answer_output = None
+    initial_constraints = None
+    violation_report = None
+    retried_after_violation = False
     if method_variant == "direct":
         answer_output = generate_student_answer_direct(
             student_model=student_model,
@@ -1087,7 +1289,11 @@ def run_single_prediction(
             ),
             interaction_decision=interaction_decision,
         )
-        constraints = compile_constraints(item_state)
+        item_state = ablate_item_state_fields(item_state, item_state_fields_mode)
+        constraints = ablate_constraint_bundle(
+            compile_constraints(item_state),
+            constraint_mode,
+        )
         answer_output = generate_student_answer(
             student_model=student_model,
             internal_signals=internal_signals,
@@ -1102,6 +1308,35 @@ def run_single_prediction(
             max_thinking_steps=(1 if method_variant == "state_single" else max_thinking_steps),
             llm_client=llm_client,
         )
+        if violation_retry_mode == "on":
+            initial_answer_output = answer_output
+            initial_constraints = constraints
+            violation_report = check_violation(
+                answer_output=answer_output,
+                item_state=item_state,
+                constraints=constraints,
+                llm_client=llm_client,
+            )
+            if should_retry_once(item_state=item_state, violation=violation_report):
+                answer_output, constraints = retry_with_tighter_constraints(
+                    student_model=student_model,
+                    internal_signals=internal_signals,
+                    problem_profile=problem_profile,
+                    item_state=item_state,
+                    constraints=constraints,
+                    interaction_decision=interaction_decision,
+                    question_id=question.question_id,
+                    question_text=question.question_text,
+                    options=question.options,
+                    response_persona=response_persona,
+                    max_thinking_steps=(
+                        1 if method_variant == "state_single" else max_thinking_steps
+                    ),
+                    llm_client=llm_client,
+                )
+                retried_after_violation = True
+        elif violation_retry_mode != "off":
+            raise ValueError(f"unknown violation_retry_mode: {violation_retry_mode}")
     return {
         "student_id": student_model.student_id,
         "question_id": question.question_id,
@@ -1111,13 +1346,29 @@ def run_single_prediction(
         "gold_answers": question.answer,
         "has_options": bool(question.options),
         "student_model": asdict(student_model),
-        "implementation_derived_signals": asdict(internal_signals),
+        "implementation_derived_signals": _internal_signals_to_payload(internal_signals),
         "problem_requirement_profile": asdict(problem_profile),
-        "student_item_interaction_decision": asdict(interaction_decision),
+        "student_item_interaction_decision": (
+            asdict(interaction_decision) if interaction_decision is not None else None
+        ),
+        "interaction_decision_mode": interaction_decision_mode,
         "item_response_state": asdict(item_state) if item_state is not None else None,
+        "item_state_fields_mode": item_state_fields_mode,
         "constraint_bundle": asdict(constraints) if constraints is not None else None,
+        "constraint_mode": constraint_mode,
         "thinking_trace": [asdict(step) for step in answer_output.thinking_trace],
         "thinking_steps_n": len(answer_output.thinking_trace),
+        "violation_retry_mode": violation_retry_mode,
+        "initial_output_before_violation_retry": (
+            asdict(initial_answer_output) if initial_answer_output is not None else None
+        ),
+        "initial_constraint_bundle_before_violation_retry": (
+            asdict(initial_constraints) if initial_constraints is not None else None
+        ),
+        "violation_report_before_retry": (
+            asdict(violation_report) if violation_report is not None else None
+        ),
+        "retried_after_violation": retried_after_violation,
     }
 
 

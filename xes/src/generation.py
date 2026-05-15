@@ -56,6 +56,21 @@ class AnswerOutput:
     thinking_trace: list[ThinkingStep]
 
 
+def _internal_signals_payload(
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
+) -> dict[str, str] | None:
+    if internal_signals is None:
+        return None
+    if isinstance(internal_signals, StudentInternalSignals):
+        return asdict(internal_signals)
+    if isinstance(internal_signals, dict):
+        payload = {str(key): str(value) for key, value in internal_signals.items()}
+        if not payload:
+            raise ValueError("internal_signals dict cannot be empty")
+        return payload
+    raise TypeError(f"unsupported internal_signals type: {type(internal_signals).__name__}")
+
+
 def _validate_enum(value: Any, allowed: set[str], field_name: str) -> str:
     text = str(value).strip()
     if text not in allowed:
@@ -114,7 +129,7 @@ def _parse_thinking_step(
 
 def _build_thinking_payload(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
     item_state: ItemResponseState,
     constraints: ConstraintBundle,
@@ -126,7 +141,7 @@ def _build_thinking_payload(
     step_index: int,
     remaining_step_budget: int,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "question_id": question_id,
         "question_text": question_text,
         "options": options,
@@ -152,7 +167,6 @@ def _build_thinking_payload(
                 else None
             ),
         },
-        "implementation_derived_signals": asdict(internal_signals),
         "problem_requirement_profile": {
             "prerequisite_knowledge": problem_profile.prerequisite_knowledge,
             "operation_complexity": problem_profile.operation_complexity,
@@ -197,11 +211,15 @@ def _build_thinking_payload(
             "student_response": "string",
         },
     }
+    signals_payload = _internal_signals_payload(internal_signals)
+    if signals_payload is not None:
+        payload["implementation_derived_signals"] = signals_payload
+    return payload
 
 
 def _request_thinking_step(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
     item_state: ItemResponseState,
     constraints: ConstraintBundle,
@@ -268,14 +286,14 @@ def _request_thinking_step(
 
 def _build_direct_answer_payload(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
     question_id: str,
     question_text: str,
     options: dict[str, str],
     interaction_decision: StudentItemInteractionDecision | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "question_id": question_id,
         "question_text": question_text,
         "options": options,
@@ -301,7 +319,6 @@ def _build_direct_answer_payload(
                 else None
             ),
         },
-        "implementation_derived_signals": asdict(internal_signals),
         "problem_requirement_profile": {
             "prerequisite_knowledge": problem_profile.prerequisite_knowledge,
             "operation_complexity": problem_profile.operation_complexity,
@@ -322,11 +339,15 @@ def _build_direct_answer_payload(
             "student_response": "string",
         },
     }
+    signals_payload = _internal_signals_payload(internal_signals)
+    if signals_payload is not None:
+        payload["implementation_derived_signals"] = signals_payload
+    return payload
 
 
 def generate_student_answer_direct(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
     question_id: str,
     question_text: str,
@@ -375,7 +396,7 @@ def generate_student_answer_direct(
 
 def generate_student_answer(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
     item_state: ItemResponseState,
     constraints: ConstraintBundle,
@@ -465,7 +486,7 @@ def should_retry_once(item_state: ItemResponseState, violation: ViolationReport)
 
 def retry_with_tighter_constraints(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
     item_state: ItemResponseState,
     constraints: ConstraintBundle,

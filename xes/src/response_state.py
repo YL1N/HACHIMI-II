@@ -126,9 +126,24 @@ def _build_item_response_state_from_parsed(parsed: dict[str, Any]) -> ItemRespon
     )
 
 
+def _internal_signals_payload(
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
+) -> dict[str, str] | None:
+    if internal_signals is None:
+        return None
+    if isinstance(internal_signals, StudentInternalSignals):
+        return asdict(internal_signals)
+    if isinstance(internal_signals, dict):
+        payload = {str(key): str(value) for key, value in internal_signals.items()}
+        if not payload:
+            raise ValueError("internal_signals dict cannot be empty")
+        return payload
+    raise TypeError(f"unsupported internal_signals type: {type(internal_signals).__name__}")
+
+
 def _resolve_item_response_state_with_llm(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     profile: ProblemRequirementProfile,
     question_text: str,
     llm_client: OpenAICompatClient,
@@ -161,7 +176,6 @@ def _resolve_item_response_state_with_llm(
             "math_anchor_profile_summary": student_model.math_anchor_profile_summary,
             "math_anchor_profile_evidence": student_model.math_anchor_profile_evidence,
         },
-        "implementation_derived_signals": asdict(internal_signals),
         "problem_requirement_profile": {
             "prerequisite_knowledge": profile.prerequisite_knowledge,
             "operation_complexity": profile.operation_complexity,
@@ -185,6 +199,9 @@ def _resolve_item_response_state_with_llm(
             "response_style_guidance": "list[str]",
         },
     }
+    signals_payload = _internal_signals_payload(internal_signals)
+    if signals_payload is not None:
+        user_payload["implementation_derived_signals"] = signals_payload
 
     # Add difficulty information if available
     if profile.perceived_difficulty_for_target_grade is not None:
@@ -234,7 +251,7 @@ def _resolve_item_response_state_with_llm(
 
 def resolve_item_response_state(
     student_model: StudentModel,
-    internal_signals: StudentInternalSignals,
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
     profile: ProblemRequirementProfile,
     question_text: str,
     llm_client: OpenAICompatClient | None = None,

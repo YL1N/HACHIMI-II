@@ -60,6 +60,8 @@ def generate_student_turn(
     error_blueprint: ErrorBlueprint,
     constraint_bundle: ConstraintBundle,
     llm_client: OpenAICompatClient,
+    use_llm_dynamic_violation_review: bool = True,
+    use_generation_retry: bool = True,
 ) -> GeneratedStudentTurn:
     initial = _generate_once(
         student_context_profile=student_context_profile,
@@ -77,7 +79,7 @@ def generate_student_turn(
         transition_prediction=transition_prediction,
         constraint_bundle=constraint_bundle,
     )
-    if not hard_violation.has_violation:
+    if use_llm_dynamic_violation_review and not hard_violation.has_violation:
         reviewed = review_dynamic_violation_with_llm(
             student_context_profile=student_context_profile,
             context=context,
@@ -92,6 +94,18 @@ def generate_student_turn(
     else:
         reviewed = hard_violation
     if not reviewed.has_violation:
+        return GeneratedStudentTurn(
+            pred_turn=initial.pred_turn,
+            draft_turn=initial.draft_turn,
+            stop_dialogue=initial.stop_dialogue,
+            step_traces=initial.step_traces,
+            violation_check=reviewed,
+            retried=False,
+            surface_realization=initial.surface_realization,
+            semantic_preservation=initial.semantic_preservation,
+        )
+
+    if not use_generation_retry:
         return GeneratedStudentTurn(
             pred_turn=initial.pred_turn,
             draft_turn=initial.draft_turn,
@@ -123,10 +137,10 @@ def generate_student_turn(
         transition_prediction=transition_prediction,
         constraint_bundle=tightened,
     )
-    final_violation = (
-        retry_hard_violation
-        if retry_hard_violation.has_violation
-        else review_dynamic_violation_with_llm(
+    if retry_hard_violation.has_violation or not use_llm_dynamic_violation_review:
+        final_violation = retry_hard_violation
+    else:
+        final_violation = review_dynamic_violation_with_llm(
             student_context_profile=student_context_profile,
             context=context,
             tutor_profile=tutor_profile,
@@ -137,7 +151,6 @@ def generate_student_turn(
             generated_turn=retried.pred_turn,
             llm_client=llm_client,
         )
-    )
     return GeneratedStudentTurn(
         pred_turn=retried.pred_turn,
         draft_turn=retried.draft_turn,

@@ -14,6 +14,7 @@ from src.problem_profile import ProblemRequirementProfile
 from src.runtime_paths import XES_ROOT
 from src.student_conditioned_benchmark import (
     BenchmarkSettings,
+    ablate_student_model_fields,
     build_benchmark_students,
     build_problem_profiles_for_questions,
     evaluate_benchmark_run,
@@ -77,20 +78,75 @@ def _resolve_xes_path(path: str) -> str:
     return str((XES_ROOT / candidate).resolve())
 
 
-def _build_single_problem_profile(args: tuple[str, object, OpenAICompatClient]) -> tuple[str, object]:
-    question_id, question, llm_client = args
+def _build_single_problem_profile(
+    args: tuple[str, object, OpenAICompatClient, bool, bool, str],
+) -> tuple[str, object]:
+    (
+        question_id,
+        question,
+        llm_client,
+        enable_difficulty_anchor_context,
+        enable_real_difficulty_band,
+        problem_profile_fields_mode,
+    ) = args
     profile = build_problem_profiles_for_questions(
         question_lookup={question_id: question},
         llm_client=llm_client,
-        enable_difficulty_anchor_context=True,
+        enable_difficulty_anchor_context=enable_difficulty_anchor_context,
+        enable_real_difficulty_band=enable_real_difficulty_band,
+        problem_profile_fields_mode=problem_profile_fields_mode,
     )[question_id]
     return question_id, profile
 
 
-def _build_single_student_stack(args: tuple[object, OpenAICompatClient]) -> tuple[str, object, object]:
-    student, llm_client = args
+def _filter_internal_signals(
+    internal_signals: StudentInternalSignals,
+    mode: str,
+) -> StudentInternalSignals | dict[str, str] | None:
+    if mode == "full":
+        return internal_signals
+    if mode == "none":
+        return None
+    if mode == "minimal":
+        return {
+            "srl_fragility_signal": internal_signals.srl_fragility_signal,
+            "directness_signal": internal_signals.directness_signal,
+        }
+    raise ValueError(f"unknown internal_signals_mode: {mode}")
+
+
+def _internal_signals_to_payload(
+    internal_signals: StudentInternalSignals | dict[str, str] | None,
+) -> dict[str, str] | None:
+    if internal_signals is None:
+        return None
+    if isinstance(internal_signals, StudentInternalSignals):
+        return asdict(internal_signals)
+    if isinstance(internal_signals, dict):
+        return {str(key): str(value) for key, value in internal_signals.items()}
+    raise TypeError(f"unsupported internal_signals type: {type(internal_signals).__name__}")
+
+
+def _build_single_student_stack(
+    args: tuple[object, OpenAICompatClient, str, str],
+) -> tuple[str, object, object]:
+    student, llm_client, internal_signals_mode, student_model_fields_mode = args
     student_model = build_student_model(student.enhanced_persona, llm_client=llm_client)
-    internal_signals = map_student_model_to_internal_signals(student_model, llm_client=llm_client)
+    student_model = ablate_student_model_fields(
+        student_model,
+        student_model_fields_mode,
+    )
+    if internal_signals_mode == "none":
+        internal_signals = None
+    else:
+        full_internal_signals = map_student_model_to_internal_signals(
+            student_model,
+            llm_client=llm_client,
+        )
+        internal_signals = _filter_internal_signals(
+            full_internal_signals,
+            internal_signals_mode,
+        )
     return student.student_id, student_model, internal_signals
 
 
@@ -124,8 +180,21 @@ def _student_model_from_dict(row: dict[str, object]) -> StudentModel:
     )
 
 
-def _student_signals_from_dict(row: dict[str, object]) -> StudentInternalSignals:
-    return StudentInternalSignals(**row)
+def _student_signals_from_dict(row: object) -> StudentInternalSignals | dict[str, str] | None:
+    if row is None:
+        return None
+    if not isinstance(row, dict):
+        raise ValueError(f"student signals row must be object or null, got {type(row).__name__}")
+    full_keys = {
+        "efficacy_signal",
+        "srl_fragility_signal",
+        "control_signal",
+        "value_signal",
+        "directness_signal",
+    }
+    if set(row) == full_keys:
+        return StudentInternalSignals(**row)
+    return {str(key): str(value) for key, value in row.items()}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -168,6 +237,51 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--method_variant", choices=["direct", "state_single", "state_step"], default="state_step")
     parser.add_argument("--response_persona", choices=["first", "third"], default="first")
     parser.add_argument("--max_thinking_steps", type=int, default=12)
+    parser.add_argument(
+        "--internal_signals_mode",
+        choices=["full", "none", "minimal"],
+        default="full",
+    )
+    parser.add_argument(
+        "--student_model_fields_mode",
+        choices=["full", "capability_only", "no_psych_fields", "no_style_fields"],
+        default="full",
+    )
+    parser.add_argument(
+        "--problem_profile_fields_mode",
+        choices=["full", "problem_core_only", "no_problem_justifications", "no_problem_notes"],
+        default="full",
+    )
+    parser.add_argument(
+        "--interaction_decision_mode",
+        choices=["full", "none"],
+        default="full",
+    )
+    parser.add_argument(
+        "--item_state_fields_mode",
+        choices=["full", "state_label_only"],
+        default="full",
+    )
+    parser.add_argument(
+        "--constraint_mode",
+        choices=["full", "loose"],
+        default="full",
+    )
+    parser.add_argument(
+        "--violation_retry_mode",
+        choices=["off", "on"],
+        default="off",
+    )
+    parser.add_argument(
+        "--enable_difficulty_anchor_context",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--enable_real_difficulty_band",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
     parser.add_argument("--max_concurrency", type=int, default=8)
     parser.add_argument("--llm_base_url", type=str, default=None)
     parser.add_argument("--llm_model", type=str, default=None)
@@ -230,6 +344,15 @@ def main() -> None:
         method_variant=args.method_variant,
         response_persona=args.response_persona,
         max_thinking_steps=args.max_thinking_steps,
+        enable_difficulty_anchor_context=args.enable_difficulty_anchor_context,
+        enable_real_difficulty_band=args.enable_real_difficulty_band,
+        internal_signals_mode=args.internal_signals_mode,
+        student_model_fields_mode=args.student_model_fields_mode,
+        problem_profile_fields_mode=args.problem_profile_fields_mode,
+        interaction_decision_mode=args.interaction_decision_mode,
+        item_state_fields_mode=args.item_state_fields_mode,
+        constraint_mode=args.constraint_mode,
+        violation_retry_mode=args.violation_retry_mode,
         sampling_seed=args.sampling_seed,
         persona_source_mode=args.persona_source_mode,
         fixed_cohort_path=args.fixed_cohort_path,
@@ -312,7 +435,17 @@ def main() -> None:
         problem_profiles = {}
         with ThreadPoolExecutor(max_workers=args.max_concurrency) as executor:
             future_map = {
-                executor.submit(_build_single_problem_profile, (question_id, question, llm_client)): question_id
+                executor.submit(
+                    _build_single_problem_profile,
+                    (
+                        question_id,
+                        question,
+                        llm_client,
+                        args.enable_difficulty_anchor_context,
+                        args.enable_real_difficulty_band,
+                        args.problem_profile_fields_mode,
+                    ),
+                ): question_id
                 for question_id, question in task_question_lookup.items()
             }
             for future in as_completed(future_map):
@@ -342,7 +475,15 @@ def main() -> None:
     if pending_students:
         with ThreadPoolExecutor(max_workers=args.max_concurrency) as executor:
             future_map = {
-                executor.submit(_build_single_student_stack, (student, llm_client)): student.student_id
+                executor.submit(
+                    _build_single_student_stack,
+                    (
+                        student,
+                        llm_client,
+                        args.internal_signals_mode,
+                        args.student_model_fields_mode,
+                    ),
+                ): student.student_id
                 for student in pending_students
             }
             for future in as_completed(future_map):
@@ -354,7 +495,7 @@ def main() -> None:
                     student_signals_path,
                     {
                         "student_id": student_id,
-                        "signals": asdict(internal_signals),
+                        "signals": _internal_signals_to_payload(internal_signals),
                     },
                 )
     print(f"student stacks built: {len(student_models)}", flush=True)
@@ -384,6 +525,10 @@ def main() -> None:
                     args.method_variant,
                     args.response_persona,
                     args.max_thinking_steps,
+                    args.interaction_decision_mode,
+                    args.item_state_fields_mode,
+                    args.constraint_mode,
+                    args.violation_retry_mode,
                 )
                 future_map[future] = (student_id, question_id, real_is_correct, history_level)
 
@@ -401,13 +546,23 @@ def main() -> None:
                         "gold_answers": question_lookup[question_id].answer,
                         "has_options": bool(question_lookup[question_id].options),
                         "student_model": asdict(student_models[student_id]),
-                        "implementation_derived_signals": asdict(student_signals[student_id]),
+                        "implementation_derived_signals": _internal_signals_to_payload(
+                            student_signals[student_id]
+                        ),
                         "problem_requirement_profile": asdict(problem_profiles[question_id]),
                         "student_item_interaction_decision": None,
+                        "interaction_decision_mode": args.interaction_decision_mode,
                         "item_response_state": None,
+                        "item_state_fields_mode": args.item_state_fields_mode,
                         "constraint_bundle": None,
+                        "constraint_mode": args.constraint_mode,
                         "thinking_trace": [],
                         "thinking_steps_n": 0,
+                        "violation_retry_mode": args.violation_retry_mode,
+                        "initial_output_before_violation_retry": None,
+                        "initial_constraint_bundle_before_violation_retry": None,
+                        "violation_report_before_retry": None,
+                        "retried_after_violation": False,
                         "prediction_failed": True,
                         "failure_stage": "run_single_prediction",
                         "failure_type": type(exc).__name__,

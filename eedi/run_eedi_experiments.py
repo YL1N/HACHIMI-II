@@ -30,6 +30,13 @@ from src.population_calibration import (
     load_population_calibration_bank,
     population_calibration_summary_to_dict,
 )
+from src.revisit_controls import (
+    apply_error_blueprint_revisit,
+    apply_interaction_state_revisit,
+    apply_student_context_profile_revisit,
+    apply_transition_prediction_revisit,
+    apply_tutor_turn_profile_revisit,
+)
 from src.runtime_paths import EEDI_OUTPUTS_DIR, EEDI_REPORTS_DIR, PROJECT_ROOT
 from src.student_model import build_student_context_profile
 from src.student_turn_state import resolve_interaction_state
@@ -113,6 +120,64 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--population_calibration_bank_path", type=str, default="")
     parser.add_argument("--population_calibration_top_k", type=int, default=0)
+    parser.add_argument(
+        "--constraint_profile",
+        type=str,
+        default="default",
+        choices=(
+            "default",
+            "loose",
+            "no_specific_error_realization",
+            "no_local_wrong_claim_anchor",
+            "no_commitment_style",
+            "no_style_constraints",
+            "minimal_length_only",
+        ),
+    )
+    parser.add_argument(
+        "--disable_llm_dynamic_violation_review",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--disable_generation_retry",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--student_context_profile_mode",
+        type=str,
+        default="full",
+        choices=("full", "behavioral_only"),
+    )
+    parser.add_argument(
+        "--tutor_turn_profile_mode",
+        type=str,
+        default="full",
+        choices=("full", "core"),
+    )
+    parser.add_argument(
+        "--interaction_state_mode",
+        type=str,
+        default="full",
+        choices=("full", "core"),
+    )
+    parser.add_argument(
+        "--transition_prediction_mode",
+        type=str,
+        default="full",
+        choices=("full", "core"),
+    )
+    parser.add_argument(
+        "--error_blueprint_mode",
+        type=str,
+        default="full",
+        choices=(
+            "full",
+            "structure_only",
+            "structure_plus_wrong_claim_seed",
+            "structure_plus_buggy_rule",
+            "structure_no_mechanism",
+        ),
+    )
     parser.add_argument(
         "--retry_until_success",
         action="store_true",
@@ -337,6 +402,14 @@ def main() -> None:
             "official_eval_input": None,
             "population_calibration_bank_path": args.population_calibration_bank_path,
             "population_calibration_top_k": args.population_calibration_top_k,
+            "constraint_profile": args.constraint_profile,
+            "disable_llm_dynamic_violation_review": args.disable_llm_dynamic_violation_review,
+            "disable_generation_retry": args.disable_generation_retry,
+            "student_context_profile_mode": args.student_context_profile_mode,
+            "tutor_turn_profile_mode": args.tutor_turn_profile_mode,
+            "interaction_state_mode": args.interaction_state_mode,
+            "transition_prediction_mode": args.transition_prediction_mode,
+            "error_blueprint_mode": args.error_blueprint_mode,
             "retry_until_success": args.retry_until_success,
             "retry_sleep_s": args.retry_sleep_s,
             "max_retry_attempts": args.max_retry_attempts,
@@ -370,6 +443,16 @@ def main() -> None:
                             llm_config=llm_config,
                             population_calibration_bank=population_calibration_bank,
                             population_calibration_top_k=int(args.population_calibration_top_k or 0),
+                            constraint_profile=str(args.constraint_profile),
+                            disable_llm_dynamic_violation_review=bool(
+                                args.disable_llm_dynamic_violation_review
+                            ),
+                            disable_generation_retry=bool(args.disable_generation_retry),
+                            student_context_profile_mode=str(args.student_context_profile_mode),
+                            tutor_turn_profile_mode=str(args.tutor_turn_profile_mode),
+                            interaction_state_mode=str(args.interaction_state_mode),
+                            transition_prediction_mode=str(args.transition_prediction_mode),
+                            error_blueprint_mode=str(args.error_blueprint_mode),
                             retry_events_path=retry_events_path,
                             retry_sleep_s=float(args.retry_sleep_s),
                             max_retry_attempts=int(args.max_retry_attempts or 0),
@@ -381,6 +464,14 @@ def main() -> None:
                             llm_config,
                             population_calibration_bank,
                             int(args.population_calibration_top_k or 0),
+                            str(args.constraint_profile),
+                            bool(args.disable_llm_dynamic_violation_review),
+                            bool(args.disable_generation_retry),
+                            str(args.student_context_profile_mode),
+                            str(args.tutor_turn_profile_mode),
+                            str(args.interaction_state_mode),
+                            str(args.transition_prediction_mode),
+                            str(args.error_blueprint_mode),
                         )
                     task_result["record"]["gt_turn"] = ground_truth_by_key[task_result["task_key"]]
                 except Exception as exc:
@@ -418,6 +509,14 @@ def main() -> None:
                             llm_config,
                             population_calibration_bank,
                             int(args.population_calibration_top_k or 0),
+                            str(args.constraint_profile),
+                            bool(args.disable_llm_dynamic_violation_review),
+                            bool(args.disable_generation_retry),
+                            str(args.student_context_profile_mode),
+                            str(args.tutor_turn_profile_mode),
+                            str(args.interaction_state_mode),
+                            str(args.transition_prediction_mode),
+                            str(args.error_blueprint_mode),
                             retry_events_path,
                             float(args.retry_sleep_s),
                             int(args.max_retry_attempts or 0),
@@ -430,6 +529,14 @@ def main() -> None:
                             llm_config,
                             population_calibration_bank,
                             int(args.population_calibration_top_k or 0),
+                            str(args.constraint_profile),
+                            bool(args.disable_llm_dynamic_violation_review),
+                            bool(args.disable_generation_retry),
+                            str(args.student_context_profile_mode),
+                            str(args.tutor_turn_profile_mode),
+                            str(args.interaction_state_mode),
+                            str(args.transition_prediction_mode),
+                            str(args.error_blueprint_mode),
                         )
                     futures[future] = task
                 for future in concurrent.futures.as_completed(futures):
@@ -514,6 +621,14 @@ def main() -> None:
             "skip_official_eval": args.skip_official_eval,
             "population_calibration_bank_path": args.population_calibration_bank_path,
             "population_calibration_top_k": args.population_calibration_top_k,
+            "constraint_profile": args.constraint_profile,
+            "disable_llm_dynamic_violation_review": args.disable_llm_dynamic_violation_review,
+            "disable_generation_retry": args.disable_generation_retry,
+            "student_context_profile_mode": args.student_context_profile_mode,
+            "tutor_turn_profile_mode": args.tutor_turn_profile_mode,
+            "interaction_state_mode": args.interaction_state_mode,
+            "transition_prediction_mode": args.transition_prediction_mode,
+            "error_blueprint_mode": args.error_blueprint_mode,
             "retry_until_success": args.retry_until_success,
             "retry_sleep_s": args.retry_sleep_s,
             "max_retry_attempts": args.max_retry_attempts,
@@ -542,10 +657,22 @@ def _execute_turn_prediction_task(
     llm_config: LLMConfig,
     population_calibration_bank,
     population_calibration_top_k: int,
+    constraint_profile: str,
+    disable_llm_dynamic_violation_review: bool,
+    disable_generation_retry: bool,
+    student_context_profile_mode: str,
+    tutor_turn_profile_mode: str,
+    interaction_state_mode: str,
+    transition_prediction_mode: str,
+    error_blueprint_mode: str,
 ) -> dict[str, object]:
     llm_client = OpenAICompatClient(llm_config)
     context = build_dialogue_context_state(task)
     tutor_profile = build_tutor_turn_profile(context=context, llm_client=llm_client)
+    tutor_profile = apply_tutor_turn_profile_revisit(
+        tutor_profile,
+        tutor_turn_profile_mode,
+    )
     population_calibration_summary = build_population_calibration_summary(
         context=context,
         tutor_profile=tutor_profile,
@@ -557,12 +684,20 @@ def _execute_turn_prediction_task(
         llm_client=llm_client,
         population_calibration_summary=population_calibration_summary,
     )
+    student_context_profile = apply_student_context_profile_revisit(
+        student_context_profile,
+        student_context_profile_mode,
+    )
     interaction_state = resolve_interaction_state(
         student_context_profile=student_context_profile,
         context=context,
         tutor_profile=tutor_profile,
         llm_client=llm_client,
         population_calibration_summary=population_calibration_summary,
+    )
+    interaction_state = apply_interaction_state_revisit(
+        interaction_state,
+        interaction_state_mode,
     )
     transition_prediction = predict_state_transition(
         student_context_profile=student_context_profile,
@@ -571,6 +706,10 @@ def _execute_turn_prediction_task(
         interaction_state=interaction_state,
         llm_client=llm_client,
         population_calibration_summary=population_calibration_summary,
+    )
+    transition_prediction = apply_transition_prediction_revisit(
+        transition_prediction,
+        transition_prediction_mode,
     )
     error_blueprint = build_error_blueprint(
         student_context_profile=student_context_profile,
@@ -581,9 +720,14 @@ def _execute_turn_prediction_task(
         llm_client=llm_client,
         population_calibration_summary=population_calibration_summary,
     )
+    error_blueprint = apply_error_blueprint_revisit(
+        error_blueprint,
+        error_blueprint_mode,
+    )
     constraint_bundle = compile_constraints(
         prediction=transition_prediction,
         error_blueprint=error_blueprint,
+        constraint_profile=constraint_profile,
     )
     generated_turn = generate_student_turn(
         student_context_profile=student_context_profile,
@@ -594,6 +738,8 @@ def _execute_turn_prediction_task(
         error_blueprint=error_blueprint,
         constraint_bundle=constraint_bundle,
         llm_client=llm_client,
+        use_llm_dynamic_violation_review=not disable_llm_dynamic_violation_review,
+        use_generation_retry=not disable_generation_retry,
     )
     trace_rows = [
         _build_trace_row(
@@ -676,6 +822,16 @@ def _execute_turn_prediction_task(
         "state_transition_prediction": asdict(transition_prediction),
         "error_blueprint": asdict(error_blueprint),
         "constraint_bundle": asdict(constraint_bundle),
+        "revisit_flags": {
+            "constraint_profile": constraint_profile,
+            "disable_llm_dynamic_violation_review": disable_llm_dynamic_violation_review,
+            "disable_generation_retry": disable_generation_retry,
+            "student_context_profile_mode": student_context_profile_mode,
+            "tutor_turn_profile_mode": tutor_turn_profile_mode,
+            "interaction_state_mode": interaction_state_mode,
+            "transition_prediction_mode": transition_prediction_mode,
+            "error_blueprint_mode": error_blueprint_mode,
+        },
         "step_traces": [asdict(step) for step in generated_turn.step_traces],
         "violation_check": asdict(generated_turn.violation_check),
         "semantic_preservation": (
@@ -701,6 +857,14 @@ def _execute_turn_prediction_task_until_success(
     llm_config: LLMConfig,
     population_calibration_bank,
     population_calibration_top_k: int,
+    constraint_profile: str,
+    disable_llm_dynamic_violation_review: bool,
+    disable_generation_retry: bool,
+    student_context_profile_mode: str,
+    tutor_turn_profile_mode: str,
+    interaction_state_mode: str,
+    transition_prediction_mode: str,
+    error_blueprint_mode: str,
     retry_events_path: Path,
     retry_sleep_s: float,
     max_retry_attempts: int,
@@ -715,6 +879,14 @@ def _execute_turn_prediction_task_until_success(
                 llm_config=llm_config,
                 population_calibration_bank=population_calibration_bank,
                 population_calibration_top_k=population_calibration_top_k,
+                constraint_profile=constraint_profile,
+                disable_llm_dynamic_violation_review=disable_llm_dynamic_violation_review,
+                disable_generation_retry=disable_generation_retry,
+                student_context_profile_mode=student_context_profile_mode,
+                tutor_turn_profile_mode=tutor_turn_profile_mode,
+                interaction_state_mode=interaction_state_mode,
+                transition_prediction_mode=transition_prediction_mode,
+                error_blueprint_mode=error_blueprint_mode,
             )
             task_result["record"]["task_retry_attempts"] = attempt
             return task_result

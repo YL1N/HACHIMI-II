@@ -30,7 +30,20 @@ class ConstraintBundle:
 def compile_constraints(
     prediction: StateTransitionPrediction,
     error_blueprint: ErrorBlueprint,
+    constraint_profile: str = "default",
 ) -> ConstraintBundle:
+    supported_profiles = {
+        "default",
+        "loose",
+        "no_specific_error_realization",
+        "no_local_wrong_claim_anchor",
+        "no_commitment_style",
+        "no_style_constraints",
+        "minimal_length_only",
+    }
+    if constraint_profile not in supported_profiles:
+        raise ValueError(f"unsupported constraint_profile: {constraint_profile}")
+
     maturity = prediction.predicted_next_response_maturity_cap
     commitment = prediction.predicted_next_response_commitment_state
     engagement = prediction.predicted_next_engagement_form
@@ -58,6 +71,12 @@ def compile_constraints(
         allow_full_reasoning = True
     else:
         raise ValueError(f"unsupported maturity cap: {maturity}")
+
+    if constraint_profile == "loose":
+        max_sentences = min(5, max_sentences + 1)
+        max_step_budget = min(5, max_step_budget + 1)
+        if maturity in {"limited_structured_reasoning", "full_student_level_reasoning"}:
+            allow_full_reasoning = True
 
     # A student can state a direct answer while still being locally uncertain or wrong.
     # Directness should depend primarily on whether the student is ready to attempt,
@@ -120,6 +139,16 @@ def compile_constraints(
         forbidden_patterns.append(
             "Do not replace the local wrong-claim target with a different subproblem, a different answer type, or a broader earlier-stage mistake."
         )
+    if constraint_profile == "loose":
+        forbidden_patterns = [
+            item
+            for item in forbidden_patterns
+            if item
+            not in {
+                "Do not replace the predicted concrete math error with generic confusion, generic hedging, or a generic help request.",
+                "Do not replace the local wrong-claim target with a different subproblem, a different answer type, or a broader earlier-stage mistake.",
+            }
+        ]
 
     style_constraints = [
         f"Stay within {max_sentences} sentence(s).",
@@ -127,6 +156,10 @@ def compile_constraints(
         _commitment_style_instruction(required_commitment_style),
         "Prefer in-the-moment student wording over polished exposition.",
     ]
+    if constraint_profile == "loose":
+        style_constraints.append(
+            "Keep the predicted local state, but allow a slightly fuller local realization if it still sounds like a student."
+        )
     if maturity == "fragment_only":
         style_constraints.append(
             "Use only a fragment, short acknowledgment, short question, or short local answer shape, not a neat full explanation."
@@ -209,6 +242,83 @@ def compile_constraints(
             "The turn may stay confused or incomplete, but do not invent a fully specific math error that is not supported by the visible state."
         )
 
+    if constraint_profile == "no_specific_error_realization":
+        must_realize_specific_error = False
+        must_anchor_to_local_wrong_claim = False
+        forbidden_patterns = _drop_constraint_phrases(
+            forbidden_patterns,
+            (
+                "predicted concrete math error",
+                "local wrong-claim target",
+            ),
+        )
+        style_constraints = _drop_constraint_phrases(
+            style_constraints,
+            (
+                "Realize one concrete local incorrect mathematical claim",
+                "Keep the error at Newman locus",
+                "Keep the error mechanism",
+                "Preserve this buggy rule",
+                "Use this wrong-claim direction",
+                "Keep the error tied to the exact local object",
+                "Do not drift to another answer type",
+            ),
+        )
+        style_constraints.append(
+            "Do not force a specific math error if the student turn can naturally remain partial, uncertain, or locally incorrect."
+        )
+    elif constraint_profile == "no_local_wrong_claim_anchor":
+        must_anchor_to_local_wrong_claim = False
+        forbidden_patterns = _drop_constraint_phrases(
+            forbidden_patterns,
+            ("local wrong-claim target",),
+        )
+        style_constraints = _drop_constraint_phrases(
+            style_constraints,
+            (
+                "Keep the error tied to the exact local object",
+                "Do not drift to another answer type",
+            ),
+        )
+        style_constraints.append(
+            "Keep the broad local error type, but do not require anchoring to a single wrong-claim seed."
+        )
+    elif constraint_profile == "no_commitment_style":
+        required_commitment_style = "tentative"
+        style_constraints = _drop_constraint_phrases(
+            style_constraints,
+            (
+                "The turn may stay minimal or avoid a substantive attempt",
+                "The turn may be partial, revising, or locally exploratory",
+                "The turn may state a clear local claim directly",
+            ),
+        )
+        style_constraints.append(
+            "Do not enforce a fixed commitment style; let the local mathematical state determine directness."
+        )
+    elif constraint_profile == "no_style_constraints":
+        style_constraints = [
+            f"Stay within {max_sentences} sentence(s).",
+        ]
+        if must_realize_specific_error:
+            style_constraints.append(
+                "Realize one concrete local incorrect mathematical claim only if it naturally fits the current student state."
+            )
+    elif constraint_profile == "minimal_length_only":
+        must_preserve_local_confusion = False
+        must_preserve_misconception_continuity = False
+        must_realize_specific_error = False
+        must_anchor_to_local_wrong_claim = False
+        required_commitment_style = "tentative"
+        forbidden_patterns = [
+            "Do not speak like a tutor.",
+            "Do not mention future turns or future plans.",
+        ]
+        style_constraints = [
+            f"Stay within {max_sentences} sentence(s).",
+            "Use in-the-moment student wording.",
+        ]
+
     return ConstraintBundle(
         max_sentences=max_sentences,
         max_step_budget=max_step_budget,
@@ -248,3 +358,7 @@ def _commitment_style_instruction(commitment: str) -> str:
             "The turn may state a clear local claim directly, but still stay within the predicted maturity."
         )
     raise ValueError(f"unsupported commitment style: {commitment}")
+
+
+def _drop_constraint_phrases(items: list[str], phrases: tuple[str, ...]) -> list[str]:
+    return [item for item in items if not any(phrase in item for phrase in phrases)]
