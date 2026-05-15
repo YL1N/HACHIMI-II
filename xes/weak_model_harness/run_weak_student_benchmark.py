@@ -236,8 +236,6 @@ def main() -> None:
         history_size=args.history_size,
         test_size=args.test_size,
         official_correctness_mode=args.official_correctness_mode,
-        method_variant="state_step",
-        response_persona="first",
         max_thinking_steps=1,
         sampling_seed=args.sampling_seed,
         persona_source_mode=args.persona_source_mode,
@@ -316,7 +314,6 @@ def main() -> None:
         problem_profiles = build_problem_profiles_for_questions(
             question_lookup=task_question_lookup,
             llm_client=strong_client,
-            enable_difficulty_anchor_context=True,
         )
         _write_json(
             problem_profiles_path,
