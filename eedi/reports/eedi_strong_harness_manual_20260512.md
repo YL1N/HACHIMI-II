@@ -264,6 +264,12 @@ detached eval 入口：
 - population calibration 提高错误外显的同时，可能会伤一部分正确/错误一致性；
 - 个别样本存在 JSON 截断导致运行不稳定。
 
+2026-05-19 补充说明：
+
+- 后续对 `structure_only + no_commitment_style` 做了全量 4334 验证；
+- 它提升了 `consistency`，但 `same_knowledge`、`same_locus`、`same_mechanism`、`error_realization` 都低于原版；
+- 因此 EEDI 当前最终版仍定为原始 strong population-calibrated 版本，不把 revisit 候选版并入最终主线。
+
 ---
 
 ## 9. 总结

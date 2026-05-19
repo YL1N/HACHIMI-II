@@ -30,7 +30,7 @@
 
 ## 输出位置
 
-- 最近一次运行输出目录：`D:\Study\sii\MathStudent\eedi\outputs\eedi_strong_revisit_block9_1000_20260515\constraint_no_specific_error_realization`
+- 最近一次运行输出目录：`D:\Study\sii\MathStudent\eedi\outputs\official_test_4334_strong_population_calibrated_train200k8_structural_only_20260511_minus_bad_104006_4779_turn6`
 - 实时阶段轨迹：`stage_traces.jsonl`
 - 最终预测：`predictions.jsonl` / `turn_level_predictions.csv`
 - 聚合指标：`metrics.json`
