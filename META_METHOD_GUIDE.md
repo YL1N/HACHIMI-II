@@ -301,13 +301,15 @@
 
 ### 9.1 XES：静态单题学生模拟
 
-- 方法说明：[xes/reports/xes_strong_harness_manual_20260512.md](xes/reports/xes_strong_harness_manual_20260512.md)
-- revisit / 消融总结：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
+- 静态方法介绍：[STATIC_SIMULATION_GUIDE.md](STATIC_SIMULATION_GUIDE.md)
+- XES 最终版说明：[xes/reports/xes_strong_harness_manual_20260512.md](xes/reports/xes_strong_harness_manual_20260512.md)
+- 设计依据：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
 
 ### 9.2 EEDI：动态 turn-level 学生交互模拟
 
-- 方法说明：[eedi/reports/eedi_strong_harness_manual_20260512.md](eedi/reports/eedi_strong_harness_manual_20260512.md)
-- revisit / 最终决策：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
+- 动态方法介绍：[DYNAMIC_SIMULATION_GUIDE.md](DYNAMIC_SIMULATION_GUIDE.md)
+- EEDI 最终版说明：[eedi/reports/eedi_strong_harness_manual_20260512.md](eedi/reports/eedi_strong_harness_manual_20260512.md)
+- 设计依据：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
 
 这两个版本分别对应：
 
@@ -315,6 +317,11 @@
 - 一个动态实例。
 
 它们不是两套互相独立的思想，而是同一套元方法的两种落地。
+
+这里要注意：
+
+- 对外介绍时，应以最终版说明为主；
+- 消融 / revisit 文档只负责解释为什么这样定，不再作为主入口。
 
 ---
 

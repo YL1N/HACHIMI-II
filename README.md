@@ -18,8 +18,8 @@ HACHIMII 不是单一任务脚本集合，而是一套**面向学生模拟的元
 如果你是第一次来到这个仓库，建议按这个顺序看：
 
 1. 元方法总说明：[META_METHOD_GUIDE.md](META_METHOD_GUIDE.md)
-2. XES 静态版本总结：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
-3. EEDI 动态版本总结：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
+2. 静态方法介绍：[STATIC_SIMULATION_GUIDE.md](STATIC_SIMULATION_GUIDE.md)
+3. 动态方法介绍：[DYNAMIC_SIMULATION_GUIDE.md](DYNAMIC_SIMULATION_GUIDE.md)
 
 ---
 
@@ -31,8 +31,9 @@ XES 是这套元方法在**静态单题学生模拟**上的应用。
 
 关注：
 
-- 方法说明：[xes/reports/xes_strong_harness_manual_20260512.md](xes/reports/xes_strong_harness_manual_20260512.md)
-- revisit / 消融报告：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
+- 方法介绍：[STATIC_SIMULATION_GUIDE.md](STATIC_SIMULATION_GUIDE.md)
+- XES 最终版说明：[xes/reports/xes_strong_harness_manual_20260512.md](xes/reports/xes_strong_harness_manual_20260512.md)
+- 设计依据（内部阅读）：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
 
 ### `eedi/`
 
@@ -40,8 +41,9 @@ EEDI 是这套元方法在**动态 turn-level 学生交互模拟**上的应用�
 
 关注：
 
-- 方法说明：[eedi/reports/eedi_strong_harness_manual_20260512.md](eedi/reports/eedi_strong_harness_manual_20260512.md)
-- revisit / 最终决策：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
+- 方法介绍：[DYNAMIC_SIMULATION_GUIDE.md](DYNAMIC_SIMULATION_GUIDE.md)
+- EEDI 最终版说明：[eedi/reports/eedi_strong_harness_manual_20260512.md](eedi/reports/eedi_strong_harness_manual_20260512.md)
+- 设计依据（内部阅读）：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
 
 ---
 
