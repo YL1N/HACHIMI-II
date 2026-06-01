@@ -20,30 +20,31 @@ HACHIMII 不是单一任务脚本集合，而是一套**面向学生模拟的元
 1. 元方法总说明：[META_METHOD_GUIDE.md](META_METHOD_GUIDE.md)
 2. 静态方法介绍：[STATIC_SIMULATION_GUIDE.md](STATIC_SIMULATION_GUIDE.md)
 3. 动态方法介绍：[DYNAMIC_SIMULATION_GUIDE.md](DYNAMIC_SIMULATION_GUIDE.md)
+4. 多数据集扩展计划：[DATASET_EXPANSION_PLAN.md](DATASET_EXPANSION_PLAN.md)
 
 ---
 
 ## 2. 仓库里有什么
 
-### `xes/`
+### `static/`
 
-XES 是这套元方法在**静态单题学生模拟**上的应用。
+`static/` 放静态做题模拟数据集和实现。当前已有 XES。
 
 关注：
 
 - 方法介绍：[STATIC_SIMULATION_GUIDE.md](STATIC_SIMULATION_GUIDE.md)
-- XES 最终版说明：[xes/reports/xes_strong_harness_manual_20260512.md](xes/reports/xes_strong_harness_manual_20260512.md)
-- 设计依据（内部阅读）：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
+- XES 最终版说明：[static/xes/reports/xes_strong_harness_manual_20260512.md](static/xes/reports/xes_strong_harness_manual_20260512.md)
+- 设计依据（内部阅读）：[static/xes/reports/xes_strong_harness_revisit_final_report_20260513.md](static/xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
 
-### `eedi/`
+### `dynamic/`
 
-EEDI 是这套元方法在**动态 turn-level 学生交互模拟**上的应用。
+`dynamic/` 放动态交互模拟数据集和实现。当前已有 EEDI QATD2k。
 
 关注：
 
 - 方法介绍：[DYNAMIC_SIMULATION_GUIDE.md](DYNAMIC_SIMULATION_GUIDE.md)
-- EEDI 最终版说明：[eedi/reports/eedi_strong_harness_manual_20260512.md](eedi/reports/eedi_strong_harness_manual_20260512.md)
-- 设计依据（内部阅读）：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
+- EEDI 最终版说明：[dynamic/eedi/reports/eedi_strong_harness_manual_20260512.md](dynamic/eedi/reports/eedi_strong_harness_manual_20260512.md)
+- 设计依据（内部阅读）：[dynamic/eedi/reports/eedi_strong_revisit_final_decision_20260519.md](dynamic/eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
 
 ---
 

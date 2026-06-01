@@ -15,6 +15,9 @@ configs/run_local.json
 eedi/configs/run_local.json
 xes/configs/run_local.json
 xes/configs/run_local_9501_qwen.json
+static/*/configs/run_local.json
+static/*/configs/run_local_*.json
+dynamic/*/configs/run_local.json
 
 # Data and large local assets
 data/
@@ -22,6 +25,14 @@ EEDI_data/
 XES3G5M/
 merged_students_10k.jsonl
 merged_students_250k.jsonl
+static/*/raw_data/
+static/*/starter_kit/
+static/enem/enem2024/
+static/enem/cache/
+dynamic/khan/CoMTA_dataset.json
+dynamic/khan/LLM_Based_Math_Tutoring.pdf
+dynamic/khan.zip
+*.zip
 
 # External repos / vendored references
 external/
@@ -30,6 +41,12 @@ external/
 outputs/
 xes/outputs/
 eedi/outputs/
+static/*/outputs/
+dynamic/*/outputs/
+static/xes/xes/
+static/*/reports/*.jpg
+static/*/reports/*.png
+static/*/reports/*_audit_*.csv
 
 # Logs and temporary artifacts
 *.log
@@ -44,3 +61,4 @@ codex_next_step.txt
 # OS noise
 .DS_Store
 Thumbs.db
+static/*/reports/*.csv

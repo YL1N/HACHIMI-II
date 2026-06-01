@@ -1,0 +1,16 @@
+{
+  "source_dataset_root": "D:\\Study\\sii\\MathStudent\\static\\enem\\enem2024",
+  "target_area": "CN",
+  "regular_codes": ["1419", "1420", "1421", "1422"],
+  "base_booklet_code": "1419",
+  "history_size": 20,
+  "max_students": 8,
+  "students_per_level": {
+    "poor": 2,
+    "low": 2,
+    "medium": 2,
+    "high": 2
+  },
+  "sampling_seed": 42,
+  "max_scan_rows": 500000
+}

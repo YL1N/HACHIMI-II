@@ -11,12 +11,12 @@
 
 本仓库现在已经不是单一路线。
 
-- `xes/`： XES 静态单题方法。
-- `eedi/`：EEDI 长链路学生交互方法。
+- `static/xes/`：XES 静态单题方法。
+- `dynamic/eedi/`：EEDI / QATD2k 长链路学生交互方法。
 
 用户已经明确要求：
 
-- 两个版本分目录隔离。
+- 静态模拟和动态模拟分目录隔离。
 - 不做顶层兼容包装。
 - 两个版本不要共用入口和核心实现，尽量降耦合。
 
@@ -29,15 +29,14 @@
 
 当前主目标是：
 
-- 基于 EEDI 数学辅导对话数据
-- 做长链路学生交互模拟
-- 先对齐 `turn-level` 当前学生回合生成
-- 再逐步推进到 `full dialogue`
+- 维护同一套学生模拟元方法；
+- 分别在静态做题模拟和动态交互模拟中验证；
+- 新数据集按模拟形态进入 `static/` 或 `dynamic/`。
 
-旧版 XES 目标仍然保留，但定位已经变成：
+当前已有两条主验证线：
 
-- 旧版静态试卷方法归档
-- 用于历史结果、回归对照、方法来源追踪
+- XES：静态主验证集；
+- EEDI / QATD2k：动态主验证集。
 
 ## 2. 项目非目标
 
@@ -54,7 +53,7 @@
 
 这里特别强调两点：
 
-- 不要为了“优雅”去抽 `xes/` 和 `eedi/` 的共享框架。
+- 不要为了“优雅”去抽 `static/` 和 `dynamic/` 的共享运行框架。
 - 不要把仓库重新做成“一个总入口调两个版本”的包装工程。
 
 ## 3. 架构原则
@@ -77,33 +76,34 @@
 project_root/
 ├── AGENTS.md
 ├── PROJECT_GUIDE.md
-├── xes/
-│   ├── run_experiments.py
-│   ├── root_cause_supervisor.py
-│   ├── manual_root_cause_stage_runner.py
-│   ├── configs/
-│   ├── reports/
-│   ├── outputs/
-│   └── src/
-├── eedi/
-│   ├── run_eedi_experiments.py
-│   ├── reports/
-│   ├── outputs/
-│   └── src/
+├── static/
+│   └── xes/
+│       ├── run_experiments.py
+│       ├── configs/
+│       ├── reports/
+│       ├── outputs/
+│       └── src/
+├── dynamic/
+│   └── eedi/
+│       ├── run_eedi_experiments.py
+│       ├── reports/
+│       ├── outputs/
+│       └── src/
 ├── external/
 └── reports/
 ```
 
 必须遵守：
 
-- `xes/` 和 `eedi/` 各自有自己的入口。
-- `xes/` 不 import `eedi/`。
-- `eedi/` 不 import `xes/`。
+- `static/` 和 `dynamic/` 各自按模拟形态隔离。
+- `static/xes/` 和 `dynamic/eedi/` 各自有自己的入口。
+- `static/` 不 import `dynamic/`。
+- `dynamic/` 不 import `static/`。
 - 顶层不新增统一包装入口。
 
 ### 3.3 EEDI 推荐模块
 
-`eedi/` 推荐保留少量核心模块：
+`dynamic/eedi/` 推荐保留少量核心模块：
 
 - `data_loading.py`
 - `student_model.py`
@@ -391,13 +391,13 @@ EEDI generation path 只能使用：
 
 - `PROJECT_GUIDE.md`
   - 主要描述旧版 XES 体系
-  - 对 `xes/` 仍然有效
+  - 对 `static/xes/` 仍然有效
 - `AGENTS.md` + `reports/eedi_pivot_plan_20260422.md` + `reports/version_split_20260422.md`
-  - 目前是 `eedi/` 的主要事实来源
+  - 目前是 `dynamic/eedi/` 的主要事实来源
 
 如果旧的 `PROJECT_GUIDE.md` 和当前 EEDI 主线冲突：
 
-- 对 `eedi/` 优先以用户最新要求和本文件为准
+- 对 `dynamic/eedi/` 优先以用户最新要求和本文件为准
 - 不要拿旧版 XES 规则去反向限制 EEDI 主线
 
 ### 10.2 方法改动要同步文档
@@ -455,7 +455,7 @@ EEDI generation path 只能使用：
 - 不去改对象层和状态层
 - 直接从历史 prompt 出回复
 - 按题目、按轮次写特判
-- 想抽共享层把 `xes/` 和 `eedi/` 又揉回一起
+- 想抽共享层把 `static/` 和 `dynamic/` 又揉回一起
 
 一旦出现这些倾向，必须停下来，回到对象层和第三人称状态层。
 

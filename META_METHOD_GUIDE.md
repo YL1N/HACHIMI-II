@@ -302,14 +302,14 @@
 ### 9.1 XES：静态单题学生模拟
 
 - 静态方法介绍：[STATIC_SIMULATION_GUIDE.md](STATIC_SIMULATION_GUIDE.md)
-- XES 最终版说明：[xes/reports/xes_strong_harness_manual_20260512.md](xes/reports/xes_strong_harness_manual_20260512.md)
-- 设计依据：[xes/reports/xes_strong_harness_revisit_final_report_20260513.md](xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
+- XES 最终版说明：[static/xes/reports/xes_strong_harness_manual_20260512.md](static/xes/reports/xes_strong_harness_manual_20260512.md)
+- 设计依据：[static/xes/reports/xes_strong_harness_revisit_final_report_20260513.md](static/xes/reports/xes_strong_harness_revisit_final_report_20260513.md)
 
 ### 9.2 EEDI：动态 turn-level 学生交互模拟
 
 - 动态方法介绍：[DYNAMIC_SIMULATION_GUIDE.md](DYNAMIC_SIMULATION_GUIDE.md)
-- EEDI 最终版说明：[eedi/reports/eedi_strong_harness_manual_20260512.md](eedi/reports/eedi_strong_harness_manual_20260512.md)
-- 设计依据：[eedi/reports/eedi_strong_revisit_final_decision_20260519.md](eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
+- EEDI 最终版说明：[dynamic/eedi/reports/eedi_strong_harness_manual_20260512.md](dynamic/eedi/reports/eedi_strong_harness_manual_20260512.md)
+- 设计依据：[dynamic/eedi/reports/eedi_strong_revisit_final_decision_20260519.md](dynamic/eedi/reports/eedi_strong_revisit_final_decision_20260519.md)
 
 这两个版本分别对应：
 
