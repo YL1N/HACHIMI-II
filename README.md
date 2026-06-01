@@ -18,10 +18,11 @@ HACHIMII 不是单一数据集脚本集合，而是一套面向学生模拟的�
 如果你第一次看这个仓库，建议按这个顺序：
 
 1. 元方法总说明：`META_METHOD_GUIDE.md`
-2. 总方法报告：`reports/hachimii_meta_method_report_20260601.md`
-3. 静态方法介绍：`STATIC_SIMULATION_GUIDE.md`
-4. 动态方法介绍：`DYNAMIC_SIMULATION_GUIDE.md`
-5. 多数据集扩展计划：`DATASET_EXPANSION_PLAN.md`
+2. Codex / agent 迁移手册：`AGENT_META_METHOD_PLAYBOOK.md`
+3. 总方法报告：`reports/hachimii_meta_method_report_20260601.md`
+4. 静态方法介绍：`STATIC_SIMULATION_GUIDE.md`
+5. 动态方法介绍：`DYNAMIC_SIMULATION_GUIDE.md`
+6. 多数据集扩展计划：`DATASET_EXPANSION_PLAN.md`
 
 ---
 
@@ -84,4 +85,3 @@ HACHIMII 的通用骨架是：
 这个仓库记录的是：
 
 > 同一套学生模拟元方法，分别在静态做题、动态辅导对话、数学和自然科学任务上的实例化。
-
