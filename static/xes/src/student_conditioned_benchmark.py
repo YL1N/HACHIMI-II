@@ -32,9 +32,19 @@ from .generation import (
 from .irt_support import _band_students
 from .llm_client import OpenAICompatClient
 from .problem_profile import ProblemRequirementProfile, build_problem_requirement_profile
-from .response_state import ConstraintBundle, ItemResponseState, compile_constraints, resolve_item_response_state
+from .response_state import (
+    ConstraintBundle,
+    ItemResponseState,
+    build_default_item_response_state_for_ablation,
+    build_format_only_constraints,
+    compile_constraints,
+    resolve_item_response_state,
+)
 from .runtime_paths import XES_OUTPUTS_DIR
-from .student_item_interaction import build_student_item_interaction_decision
+from .student_item_interaction import (
+    StudentItemInteractionDecision,
+    build_student_item_interaction_decision,
+)
 from .student_model import StudentInternalSignals, StudentModel, build_student_model, map_student_model_to_internal_signals
 from .persona_anchoring import _load_support_question_profiles
 from .rasch_fit import filter_extreme_scores, fit_rasch_jml
@@ -125,6 +135,21 @@ def loosen_constraint_bundle(
         preferred_error_path=[],
         style_constraints=[],
         allowed_commitment="high",
+    )
+
+
+def build_default_interaction_decision_for_ablation() -> StudentItemInteractionDecision:
+    return StudentItemInteractionDecision(
+        predicted_reachability="partial",
+        predicted_correctness_band="0.4-0.7",
+        likely_outcome="generic partial attempt without task-local learner-state inference",
+        likely_error_family="generic_uncertainty",
+        confidence_cap="medium",
+        explanation_cap="short_reason",
+        decision_rationale=[
+            "ablation=without_task_local_state",
+            "neutral task-format decision; no current-item learner state inferred",
+        ],
     )
 
 
@@ -926,6 +951,42 @@ def _load_candidate_personas(settings: BenchmarkSettings) -> list[PersonaRecord]
     return candidate_personas
 
 
+def _build_history_only_benchmark_student(
+    student_id: str,
+    history: list[tuple[str, bool]],
+    test: list[tuple[str, bool]],
+    summary: HistorySummary,
+    target_grade: str,
+) -> BenchmarkStudent:
+    observed_persona = PersonaRecord(
+        student_id=summary.student_id,
+        grade=target_grade,
+        academic_level=summary.history_level,
+        strong_subjects=[],
+        weak_subjects=[],
+        learning_profile_text="",
+    )
+    enhanced_persona = _build_enhanced_persona(
+        summary=summary,
+        matched_persona=observed_persona,
+        persona_source_mode="xes_history_only",
+    )
+    return BenchmarkStudent(
+        student_id=student_id,
+        history=history,
+        test=test,
+        history_summary=summary,
+        matched_persona_id="",
+        matched_persona_score=0.0,
+        enhanced_persona=enhanced_persona,
+        persona_matcher_version="none_xes_history_only",
+        candidate_persona_ids=[],
+        persona_match_evidence=[],
+        persona_conflict_evidence=[],
+        persona_fusion_rule="No HACHIMI-1M prior; StudentModel is built only from generation-visible XES history.",
+    )
+
+
 def _attach_personas_to_rows(
     *,
     selected_rows: list[tuple[str, list[tuple[str, bool]], list[tuple[str, bool]]]],
@@ -949,12 +1010,24 @@ def attach_personas_to_rows_with_optional_llm(
     candidate_personas: list[PersonaRecord],
     persona_source_mode: str,
     llm_client: OpenAICompatClient | None,
+    target_grade: str = "",
 ) -> list[BenchmarkStudent]:
     benchmark_students: list[BenchmarkStudent] = []
     total_selected = len(selected_rows)
     for row_idx, (student_id, history, test) in enumerate(selected_rows, start=1):
         summary = history_summaries.get(student_id)
         if summary is None:
+            continue
+        if persona_source_mode == "xes_history_only":
+            benchmark_students.append(
+                _build_history_only_benchmark_student(
+                    student_id=student_id,
+                    history=history,
+                    test=test,
+                    summary=summary,
+                    target_grade=target_grade,
+                )
+            )
             continue
         candidates = rank_persona_candidates(summary, candidate_personas, top_k=8)
         if llm_client is None:
@@ -1116,9 +1189,14 @@ def _build_fixed_common_test_benchmark_students(
     benchmark_students = attach_personas_to_rows_with_optional_llm(
         selected_rows=selected_rows,
         history_summaries=history_summaries,
-        candidate_personas=_load_candidate_personas(settings),
+        candidate_personas=(
+            [] if settings.persona_source_mode == "xes_history_only" else _load_candidate_personas(settings)
+        ),
         persona_source_mode=settings.persona_source_mode,
-        llm_client=persona_match_llm_client,
+        llm_client=(
+            None if settings.persona_source_mode == "xes_history_only" else persona_match_llm_client
+        ),
+        target_grade=settings.target_grade,
     )
     if len(benchmark_students) != len(selected_student_ids):
         raise ValueError(
@@ -1189,13 +1267,9 @@ def build_benchmark_students(
         history_size=settings.history_size,
         response_csv_path=settings.response_csv_path,
     )
-    raw_personas = load_personas(settings.persona_path, limit=None)
-    if settings.strict_same_grade_persona:
-        candidate_personas = [persona for persona in raw_personas if persona.grade == settings.target_grade]
-    else:
-        candidate_personas = raw_personas
-    if not candidate_personas:
-        raise ValueError("no candidate personas available for matching")
+    candidate_personas = (
+        [] if settings.persona_source_mode == "xes_history_only" else _load_candidate_personas(settings)
+    )
 
     rng = random.Random(settings.sampling_seed)
     candidate_rows = list(filtered_rows)
@@ -1210,6 +1284,17 @@ def build_benchmark_students(
             continue
         summary = history_summaries.get(student_id)
         if summary is None:
+            continue
+        if settings.persona_source_mode == "xes_history_only":
+            benchmark_students.append(
+                _build_history_only_benchmark_student(
+                    student_id=student_id,
+                    history=history,
+                    test=test,
+                    summary=summary,
+                    target_grade=settings.target_grade,
+                )
+            )
             continue
         candidates = rank_persona_candidates(summary, candidate_personas, top_k=8)
         if persona_match_llm_client is None:
@@ -1327,21 +1412,31 @@ def run_single_prediction(
     problem_profile: ProblemRequirementProfile,
     llm_client: OpenAICompatClient,
     max_thinking_steps: int,
+    ablation_mode: str = "full",
 ) -> dict[str, object]:
-    interaction_decision = build_student_item_interaction_decision(
-        student_model=student_model,
-        profile=problem_profile,
-    )
-    item_state = resolve_item_response_state(
-        student_model=student_model,
-        internal_signals=internal_signals,
-        profile=problem_profile,
-        question_text=question.question_text,
-        llm_client=llm_client,
-        use_difficulty_aware_prompt=False,
-        interaction_decision=interaction_decision,
-    )
-    constraints = loosen_constraint_bundle(compile_constraints(item_state))
+    if ablation_mode == "without_task_local_state":
+        interaction_decision = build_default_interaction_decision_for_ablation()
+        item_state = build_default_item_response_state_for_ablation()
+        constraints = build_format_only_constraints(max_thinking_steps=max_thinking_steps)
+    else:
+        interaction_decision = build_student_item_interaction_decision(
+            student_model=student_model,
+            profile=problem_profile,
+        )
+        item_state = resolve_item_response_state(
+            student_model=student_model,
+            internal_signals=internal_signals,
+            profile=problem_profile,
+            question_text=question.question_text,
+            llm_client=llm_client,
+            use_difficulty_aware_prompt=False,
+            interaction_decision=interaction_decision,
+        )
+        constraints = (
+            build_format_only_constraints(max_thinking_steps=max_thinking_steps)
+            if ablation_mode == "without_behavior_harness"
+            else loosen_constraint_bundle(compile_constraints(item_state))
+        )
     answer_output = generate_student_answer(
         student_model=student_model,
         internal_signals=internal_signals,
@@ -1355,6 +1450,7 @@ def run_single_prediction(
         response_persona="first",
         max_thinking_steps=max_thinking_steps,
         llm_client=llm_client,
+        use_behavior_harness=ablation_mode != "without_behavior_harness",
     )
     return {
         "student_id": student_model.student_id,
@@ -1377,6 +1473,8 @@ def run_single_prediction(
         "response_persona": "first",
         "difficulty_signal_enabled": False,
         "constraint_profile": "loose",
+        "ablation_mode": ablation_mode,
+        "behavior_harness_used_in_generation": ablation_mode != "without_behavior_harness",
         "thinking_trace": [asdict(step) for step in answer_output.thinking_trace],
         "thinking_steps_n": len(answer_output.thinking_trace),
     }

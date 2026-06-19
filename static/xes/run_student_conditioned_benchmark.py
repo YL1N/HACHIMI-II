@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import datetime
@@ -12,8 +13,13 @@ from src.evaluation import apply_official_correctness_labels
 from src.llm_client import LLMConfig, OpenAICompatClient
 from src.problem_profile import ProblemRequirementProfile
 from src.runtime_paths import resolve_xes_path
+from src.data_loading import MathAnchorProfile, MathTaskCapabilityAnchor, PersonaRecord
 from src.student_conditioned_benchmark import (
     BenchmarkSettings,
+    BenchmarkStudent,
+    HistorySummary,
+    _build_question_lookup_with_metadata,
+    _load_eligible_question_rows,
     build_benchmark_students,
     build_problem_profiles_for_questions,
     evaluate_benchmark_run,
@@ -28,6 +34,22 @@ from src.student_model import (
     StudentModel,
     build_student_model,
     map_student_model_to_internal_signals,
+)
+
+
+TRANSIENT_LLM_ERROR_MARKERS = (
+    "http error status=429",
+    "http error status=500",
+    "http error status=502",
+    "http error status=503",
+    "http error status=504",
+    "gateway timeout",
+    "stream timeout",
+    "timed out",
+    "timeout",
+    "connection reset",
+    "remote end closed connection",
+    "temporarily unavailable",
 )
 
 
@@ -68,6 +90,44 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
                     raise ValueError(f"jsonl row must be object: {path}")
                 rows.append(row)
     return rows
+
+
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    messages: list[str] = []
+    current: BaseException | None = exc
+    while current is not None:
+        messages.append(str(current).lower())
+        current = current.__cause__
+    text = "\n".join(messages)
+    return any(marker in text for marker in TRANSIENT_LLM_ERROR_MARKERS)
+
+
+def _result_with_transient_retry(
+    build_fn,
+    object_name: str,
+    object_id: str,
+    max_attempts: int = 4,
+    sleep_s: float = 2.0,
+):
+    last_error: BaseException | None = None
+    for attempt_idx in range(max_attempts):
+        try:
+            return build_fn()
+        except Exception as exc:
+            last_error = exc
+            if not _is_transient_llm_error(exc) or attempt_idx + 1 >= max_attempts:
+                raise
+            wait_s = sleep_s * (attempt_idx + 1)
+            print(
+                f"[RetryObject] {object_name} id={object_id} "
+                f"attempt={attempt_idx + 1}/{max_attempts} "
+                f"error={type(exc).__name__}; sleep={wait_s:.1f}s",
+                flush=True,
+            )
+            time.sleep(wait_s)
+    raise RuntimeError(f"{object_name} id={object_id} failed after retry") from last_error
 
 
 def _resolve_xes_path(path: str) -> str:
@@ -141,6 +201,66 @@ def _student_signals_from_dict(row: object) -> StudentInternalSignals:
     return StudentInternalSignals(**row)
 
 
+def _persona_from_dict(row: dict[str, object]) -> PersonaRecord:
+    math_anchor = row.get("math_anchor_profile")
+    capability_anchor = row.get("math_task_capability_anchor")
+    return PersonaRecord(
+        student_id=str(row["student_id"]),
+        grade=str(row["grade"]),
+        academic_level=str(row["academic_level"]),
+        strong_subjects=list(row["strong_subjects"]),
+        weak_subjects=list(row["weak_subjects"]),
+        learning_profile_text=str(row["learning_profile_text"]),
+        math_anchor_profile=(
+            MathAnchorProfile(**math_anchor) if isinstance(math_anchor, dict) else None
+        ),
+        math_task_capability_anchor=(
+            MathTaskCapabilityAnchor(**capability_anchor)
+            if isinstance(capability_anchor, dict)
+            else None
+        ),
+    )
+
+
+def _benchmark_student_from_dict(row: dict[str, object]) -> BenchmarkStudent:
+    return BenchmarkStudent(
+        student_id=str(row["student_id"]),
+        history=[
+            (str(question_id), bool(is_correct))
+            for question_id, is_correct in row["history"]  # type: ignore[assignment]
+        ],
+        test=[
+            (str(question_id), bool(is_correct))
+            for question_id, is_correct in row["test"]  # type: ignore[assignment]
+        ],
+        history_summary=HistorySummary(**row["history_summary"]),  # type: ignore[arg-type]
+        matched_persona_id=str(row["matched_persona_id"]),
+        matched_persona_score=float(row["matched_persona_score"]),
+        enhanced_persona=_persona_from_dict(row["enhanced_persona"]),  # type: ignore[arg-type]
+        persona_matcher_version=str(row.get("persona_matcher_version", "")),
+        candidate_persona_ids=(
+            [str(item) for item in row["candidate_persona_ids"]]
+            if row.get("candidate_persona_ids") is not None
+            else None
+        ),
+        persona_match_evidence=(
+            [str(item) for item in row["persona_match_evidence"]]
+            if row.get("persona_match_evidence") is not None
+            else None
+        ),
+        persona_conflict_evidence=(
+            [str(item) for item in row["persona_conflict_evidence"]]
+            if row.get("persona_conflict_evidence") is not None
+            else None
+        ),
+        persona_fusion_rule=str(row.get("persona_fusion_rule", "")),
+    )
+
+
+def _load_cached_benchmark_students(path: Path) -> list[BenchmarkStudent]:
+    return [_benchmark_student_from_dict(row) for row in _read_jsonl(path)]
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run XES student-conditioned benchmark with enhanced personas."
@@ -176,6 +296,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["xes_history_plus_hachimi", "xes_history_only"],
         default="xes_history_plus_hachimi",
     )
+    parser.add_argument(
+        "--ablation_mode",
+        choices=[
+            "full",
+            "without_hachimi_prior",
+            "without_task_local_state",
+            "without_behavior_harness",
+        ],
+        default="full",
+    )
     parser.add_argument("--prepare_only", action="store_true")
     parser.add_argument("--official_correctness_mode", choices=["rules_only", "rules_plus_llm_ambiguous_review"], default="rules_only")
     parser.add_argument("--max_thinking_steps", type=int, default=12)
@@ -205,6 +335,8 @@ def main() -> None:
         args.fixed_cohort_path = _resolve_xes_path(args.fixed_cohort_path)
     if args.resume_run_dir:
         args.resume_run_dir = _resolve_xes_path(args.resume_run_dir)
+    if args.ablation_mode == "without_hachimi_prior":
+        args.persona_source_mode = "xes_history_only"
 
     if not args.prepare_only:
         if args.llm_api_key_env and not args.llm_api_key:
@@ -258,15 +390,30 @@ def main() -> None:
             )
         )
 
-    benchmark_students, question_lookup, benchmark_summary = build_benchmark_students(
-        settings,
-        persona_match_llm_client=llm_client,
-    )
+    benchmark_students_path = run_dir / "benchmark_students.jsonl"
+    benchmark_summary_path = run_dir / "benchmark_summary.json"
+    if benchmark_students_path.exists() and benchmark_summary_path.exists():
+        benchmark_students = _load_cached_benchmark_students(benchmark_students_path)
+        benchmark_summary = _read_json(benchmark_summary_path)
+        eligible_rows = _load_eligible_question_rows(settings.eligible_question_path)
+        question_lookup = _build_question_lookup_with_metadata(
+            question_path=settings.question_path,
+            eligible_rows=eligible_rows,
+        )
+        print(
+            f"loaded cached benchmark students: {len(benchmark_students)}",
+            flush=True,
+        )
+    else:
+        benchmark_students, question_lookup, benchmark_summary = build_benchmark_students(
+            settings,
+            persona_match_llm_client=llm_client,
+        )
     if not (run_dir / "benchmark_summary.json").exists():
         _write_json(run_dir / "benchmark_summary.json", benchmark_summary)
-    if not (run_dir / "benchmark_students.jsonl").exists():
+    if not benchmark_students_path.exists():
         _write_jsonl(
-            run_dir / "benchmark_students.jsonl",
+            benchmark_students_path,
             [
                 {
                     "student_id": student.student_id,
@@ -334,7 +481,12 @@ def main() -> None:
         problem_profiles = {}
         with ThreadPoolExecutor(max_workers=args.max_concurrency) as executor:
             future_map = {
-                executor.submit(_build_single_problem_profile, (question_id, question, llm_client)): question_id
+                executor.submit(
+                    _result_with_transient_retry,
+                    lambda question_id=question_id, question=question: _build_single_problem_profile((question_id, question, llm_client)),
+                    "ProblemProfile",
+                    question_id,
+                ): question_id
                 for question_id, question in task_question_lookup.items()
             }
             for future in as_completed(future_map):
@@ -364,7 +516,12 @@ def main() -> None:
     if pending_students:
         with ThreadPoolExecutor(max_workers=args.max_concurrency) as executor:
             future_map = {
-                executor.submit(_build_single_student_stack, (student, llm_client)): student.student_id
+                executor.submit(
+                    _result_with_transient_retry,
+                    lambda student=student: _build_single_student_stack((student, llm_client)),
+                    "StudentStack",
+                    student.student_id,
+                ): student.student_id
                 for student in pending_students
             }
             for future in as_completed(future_map):
@@ -404,6 +561,7 @@ def main() -> None:
                     problem_profiles[question_id],
                     llm_client,
                     args.max_thinking_steps,
+                    args.ablation_mode,
                 )
                 future_map[future] = (student_id, question_id, real_is_correct, history_level)
 

@@ -140,6 +140,7 @@ def _build_thinking_payload(
     thinking_trace: list[ThinkingStep],
     step_index: int,
     remaining_step_budget: int,
+    include_constraint_bundle: bool = True,
 ) -> dict[str, Any]:
     payload = {
         "question_id": question_id,
@@ -187,15 +188,6 @@ def _build_thinking_payload(
             "explanation_depth_cap": item_state.explanation_depth_cap,
             "response_style_guidance": item_state.response_style_guidance,
         },
-        "constraint_bundle": {
-            "must_commit_answer": constraints.must_commit_answer,
-            "allow_complete_explanation": constraints.allow_complete_explanation,
-            "max_sentences": constraints.max_sentences,
-            "forbid_full_mastery": constraints.forbid_full_mastery,
-            "preferred_error_path": constraints.preferred_error_path,
-            "style_constraints": constraints.style_constraints,
-            "allowed_commitment": constraints.allowed_commitment,
-        },
         "student_item_interaction_decision": (
             asdict(interaction_decision) if interaction_decision is not None else None
         ),
@@ -211,6 +203,16 @@ def _build_thinking_payload(
             "student_response": "string",
         },
     }
+    if include_constraint_bundle:
+        payload["constraint_bundle"] = {
+            "must_commit_answer": constraints.must_commit_answer,
+            "allow_complete_explanation": constraints.allow_complete_explanation,
+            "max_sentences": constraints.max_sentences,
+            "forbid_full_mastery": constraints.forbid_full_mastery,
+            "preferred_error_path": constraints.preferred_error_path,
+            "style_constraints": constraints.style_constraints,
+            "allowed_commitment": constraints.allowed_commitment,
+        }
     signals_payload = _internal_signals_payload(internal_signals)
     if signals_payload is not None:
         payload["implementation_derived_signals"] = signals_payload
@@ -232,6 +234,7 @@ def _request_thinking_step(
     remaining_step_budget: int,
     response_persona: str,
     llm_client: OpenAICompatClient,
+    use_behavior_harness: bool = True,
 ) -> ThinkingStep:
     user_payload = _build_thinking_payload(
         student_model=student_model,
@@ -246,9 +249,13 @@ def _request_thinking_step(
         thinking_trace=thinking_trace,
         step_index=step_index,
         remaining_step_budget=remaining_step_budget,
+        include_constraint_bundle=use_behavior_harness,
     )
     require_final_answer = remaining_step_budget == 1
-    system_prompt = get_answer_generator_prompt(response_persona)
+    system_prompt = get_answer_generator_prompt(
+        response_persona,
+        use_behavior_harness=use_behavior_harness,
+    )
     if require_final_answer:
         system_prompt += TERMINAL_STEP_PROTOCOL_SUFFIX
     partial_keys = [
@@ -407,6 +414,7 @@ def generate_student_answer(
     response_persona: str = "first",
     max_thinking_steps: int = 12,
     llm_client: OpenAICompatClient | None = None,
+    use_behavior_harness: bool = True,
 ) -> AnswerOutput:
     if llm_client is None:
         raise ValueError(
@@ -441,6 +449,7 @@ def generate_student_answer(
             remaining_step_budget=remaining_step_budget,
             response_persona=response_persona,
             llm_client=llm_client,
+            use_behavior_harness=use_behavior_harness,
         )
         thinking_trace.append(step)
         if step.next_action == "final_answer":

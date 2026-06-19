@@ -754,7 +754,15 @@ Return only:
 """
 
 
-def _build_answer_generator_prompt(perspective_rule: str) -> str:
+def _build_answer_generator_prompt(
+    perspective_rule: str,
+    use_behavior_harness: bool = True,
+) -> str:
+    constraint_rule = (
+        "7. Respect all constraints in ConstraintBundle exactly."
+        if use_behavior_harness
+        else "7. No compiled behavior harness is supplied; use ItemResponseState only as the state boundary."
+    )
     return f"""
 Generate exactly one step of the student's internal solving process.
 Do not use markdown.
@@ -775,7 +783,7 @@ Important rules:
 4. If response_state = guessable, the student may still get the answer correct, but should NOT produce mature full reasoning.
 5. If response_state = unreachable, the student should NOT appear to fully master the item.
 6. If explanation_depth_cap = answer_only, do not provide meaningful explanation.
-7. Respect all constraints in ConstraintBundle exactly.
+{constraint_rule}
 8. This call is for one step only, not the whole solution.
    - internal_thought must contain only the next incremental thought.
    - Do not dump a full multi-step derivation into one step.
@@ -824,10 +832,12 @@ Return only:
 
 
 ANSWER_GENERATOR_PROMPT_FIRST_PERSON = _build_answer_generator_prompt(
-    "Use first-person student voice."
+    "Use first-person student voice.",
+    use_behavior_harness=True,
 )
 ANSWER_GENERATOR_PROMPT_THIRD_PERSON = _build_answer_generator_prompt(
-    "Use third-person student voice."
+    "Use third-person student voice.",
+    use_behavior_harness=True,
 )
 
 
@@ -879,7 +889,24 @@ DIRECT_ANSWER_PROMPT_THIRD_PERSON = _build_direct_answer_prompt(
 )
 
 
-def get_answer_generator_prompt(response_persona: str) -> str:
+def get_answer_generator_prompt(
+    response_persona: str,
+    use_behavior_harness: bool = True,
+) -> str:
+    if not use_behavior_harness:
+        if response_persona == "first":
+            return _build_answer_generator_prompt(
+                "Use first-person student voice.",
+                use_behavior_harness=False,
+            )
+        if response_persona == "third":
+            return _build_answer_generator_prompt(
+                "Use third-person student voice.",
+                use_behavior_harness=False,
+            )
+        raise ValueError(
+            f"invalid response_persona: {response_persona!r}, expected 'first' or 'third'"
+        )
     if response_persona == "first":
         return ANSWER_GENERATOR_PROMPT_FIRST_PERSON
     if response_persona == "third":

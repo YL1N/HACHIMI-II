@@ -349,6 +349,34 @@ def compile_constraints(item_state: ItemResponseState) -> ConstraintBundle:
     )
 
 
+def build_default_item_response_state_for_ablation() -> ItemResponseState:
+    return ItemResponseState(
+        prerequisite_familiarity="partially_familiar",
+        response_state="partial",
+        reachable_level="generic task-format boundary; no current-item learner state inferred",
+        error_path=["generic_uncertainty"],
+        commitment_tendency="medium",
+        explanation_depth_cap="short_reason",
+        response_style_guidance=[
+            "brief student-style answer",
+            "no task-local learner state was inferred",
+        ],
+    )
+
+
+def build_format_only_constraints(max_thinking_steps: int = 4) -> ConstraintBundle:
+    return ConstraintBundle(
+        must_commit_answer=True,
+        allow_complete_explanation=True,
+        max_sentences=3,
+        max_thinking_steps=max(1, max_thinking_steps),
+        forbid_full_mastery=False,
+        preferred_error_path=[],
+        style_constraints=[],
+        allowed_commitment="any",
+    )
+
+
 def _count_sentences(text: str) -> int:
     parts = [part.strip() for part in SENTENCE_SPLIT_RE.split(text.strip()) if part.strip()]
     return len(parts)
