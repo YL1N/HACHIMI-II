@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="figures/xilin_poem_xingshu.svg" data-w alt="横看成岭侧成峰，远近高低各不同。不识庐山真面目，只缘身在此山中。——苏轼《题西林壁》" width="820">
+  <img src="figures/xilin_poem_xingshu.svg" alt="横看成岭侧成峰，远近高低各不同。不识庐山真面目，只缘身在此山中。——苏轼《题西林壁》" width="820">
 </p>
 
 <p align="center"><sub>横看成岭侧成峰，远近高低各不同。不识庐山真面目，只缘身在此山中。——苏轼《题西林壁》</sub></p>

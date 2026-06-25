@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="figures/xilin_poem_xingshu.svg" data-w alt="Viewed from across, a ridge; from the side, a peak. Far, near, high, low — never the same. You cannot know the true face of Mount Lu, only because you are within the mountain. — Su Shi" width="820">
+  <img src="figures/xilin_poem_xingshu.svg" alt="Viewed from across, a ridge; from the side, a peak. Far, near, high, low — never the same. You cannot know the true face of Mount Lu, only because you are within the mountain. — Su Shi" width="820">
 </p>
 
 <p align="center"><sub>Viewed from across, a ridge; from the side, a peak — far, near, high, low, never the same.<br>You cannot know the true face of Mount Lu, only because you are within the mountain.<br>— Su Shi, <i>Written on the Wall of Xilin Temple</i></sub></p>
