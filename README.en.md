@@ -59,7 +59,7 @@ Across 5 datasets, HACHIMI-II simultaneously suppresses competence leakage and r
 | Eedi QATD2k | **0.399** | ≤ 0.180 |
 | Khan/CoMTA | **0.649** | ≤ 0.113 |
 
-> Full functional-agreement (κ_func / MCC_func), error-state (BAcc_err / MCC_err), calibration (Calib), and ablation contrasts are in [`reports/core_ablation_20260611/component_analysis/`](reports/core_ablation_20260611/component_analysis/).
+> Full functional-agreement (κ_func / MCC_func), error-state (BAcc_err / MCC_err), calibration (Calib), and the three ablations (removing the persona prior / task-local state / behavior harness) are reported in the paper and its appendix.
 
 ---
 
@@ -117,7 +117,7 @@ dynamic/
   khan/          # Khan / CoMTA   dynamic tutoring-dialogue transfer experiment
   baselines/     # dynamic baselines (+ Agent-Mem)
 
-reports/         # experiment reports & paper-ready results (component analysis, etc.)
+reports/         # experiment reports & result summaries
 figures/         # figures and assets
 ```
 

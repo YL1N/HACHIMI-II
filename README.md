@@ -59,7 +59,7 @@ HACHIMI-II 不是一组各自为政的数据集脚本，而是**一套统一的�
 | Eedi QATD2k | **0.399** | ≤ 0.180 |
 | Khan/CoMTA | **0.649** | ≤ 0.113 |
 
-> 完整的功能一致性（κ_func / MCC_func）、错误状态指标（BAcc_err / MCC_err）、校准（Calib）与消融对照见 [`reports/core_ablation_20260611/component_analysis/`](reports/core_ablation_20260611/component_analysis/)。
+> 完整的功能一致性（κ_func / MCC_func）、错误状态指标（BAcc_err / MCC_err）、校准（Calib）以及三项消融（去除画像先验 / 任务局部状态 / 行为约束）的对照，详见论文与附录。
 
 ---
 
@@ -117,7 +117,7 @@ dynamic/
   khan/          # Khan / CoMTA   动态辅导对话迁移实验
   baselines/     # 动态 baseline（+ Agent-Mem）
 
-reports/         # 实验报告与论文用结果（component analysis 等）
+reports/         # 实验报告与结果汇总
 figures/         # 图与素材
 ```
 
