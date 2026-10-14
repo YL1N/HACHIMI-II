@@ -92,8 +92,8 @@ Place the raw data under the paths referenced by each setting's config, or point
 ## Quick start
 
 ```bash
-git clone https://github.com/YL1N/HACHIMII.git
-cd HACHIMII
+git clone https://github.com/YL1N/HACHIMI-II.git
+cd HACHIMI-II
 pip install -r requirements.txt
 ```
 

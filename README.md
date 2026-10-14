@@ -85,8 +85,8 @@ HACHIMI-II 的做法是**建模学习者的行为**，把学生模拟改写成�
 ## 快速开始
 
 ```bash
-git clone https://github.com/YL1N/HACHIMII.git
-cd HACHIMII
+git clone https://github.com/YL1N/HACHIMI-II.git
+cd HACHIMI-II
 pip install -r requirements.txt   # 核心流程只用标准库；部分评测组件需要 numpy 和 rouge_score
 ```
 
