@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 
-from .constraint_bundle import ConstraintBundle
+from .constraint_bundle import BehaviorHarness
 from .dialogue_context import DialogueContextState
 from .error_blueprint import ErrorBlueprint
 from .llm_client import OpenAICompatClient, require_keys
@@ -19,7 +19,7 @@ from .semantic_preservation import (
 )
 from .surface_style import SurfaceRealizedTurn, realize_student_surface_turn
 from .student_model import StudentContextProfile
-from .student_turn_state import InteractionState
+from .student_turn_state import TaskLocalLearnerState
 from .transition import StateTransitionPrediction
 from .tutor_turn_profile import TutorTurnProfile
 
@@ -55,13 +55,14 @@ def generate_student_turn(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     transition_prediction: StateTransitionPrediction,
     error_blueprint: ErrorBlueprint,
-    constraint_bundle: ConstraintBundle,
+    constraint_bundle: BehaviorHarness,
     llm_client: OpenAICompatClient,
     use_llm_dynamic_violation_review: bool = True,
     use_generation_retry: bool = True,
+    use_behavior_harness: bool = True,
 ) -> GeneratedStudentTurn:
     initial = _generate_once(
         student_context_profile=student_context_profile,
@@ -73,7 +74,26 @@ def generate_student_turn(
         constraint_bundle=constraint_bundle,
         llm_client=llm_client,
         retry_note="",
+        use_behavior_harness=use_behavior_harness,
     )
+    if not use_behavior_harness:
+        return GeneratedStudentTurn(
+            pred_turn=initial.pred_turn,
+            draft_turn=initial.draft_turn,
+            stop_dialogue=initial.stop_dialogue,
+            step_traces=initial.step_traces,
+            violation_check=DynamicViolationCheck(
+                has_violation=False,
+                violation_types=[],
+                rationale=[
+                    "behavior harness disabled for ablation; no ConstraintBundle prompt, violation review, repair, or surface-realizer pass used"
+                ],
+                llm_review_used=False,
+            ),
+            retried=False,
+            surface_realization=None,
+            semantic_preservation=None,
+        )
     hard_violation = check_hard_dynamic_violations(
         generated_turn=initial.pred_turn,
         transition_prediction=transition_prediction,
@@ -131,6 +151,7 @@ def generate_student_turn(
             "Previous attempt violated the predicted state. "
             f"Violation types: {reviewed.violation_types}."
         ),
+        use_behavior_harness=True,
     )
     retry_hard_violation = check_hard_dynamic_violations(
         generated_turn=retried.pred_turn,
@@ -166,7 +187,7 @@ def generate_student_turn(
 def check_hard_dynamic_violations(
     generated_turn: str,
     transition_prediction: StateTransitionPrediction,
-    constraint_bundle: ConstraintBundle,
+    constraint_bundle: BehaviorHarness,
 ) -> DynamicViolationCheck:
     text = generated_turn.strip()
     if not text:
@@ -227,10 +248,10 @@ def review_dynamic_violation_with_llm(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     transition_prediction: StateTransitionPrediction,
     error_blueprint: ErrorBlueprint,
-    constraint_bundle: ConstraintBundle,
+    constraint_bundle: BehaviorHarness,
     generated_turn: str,
     llm_client: OpenAICompatClient,
 ) -> DynamicViolationCheck:
@@ -275,9 +296,9 @@ def review_dynamic_violation_with_llm(
 
 
 def retry_with_tighter_constraints(
-    constraint_bundle: ConstraintBundle,
+    constraint_bundle: BehaviorHarness,
     violation_check: DynamicViolationCheck,
-) -> ConstraintBundle:
+) -> BehaviorHarness:
     violation_types = set(violation_check.violation_types)
     max_sentences = constraint_bundle.max_sentences
     max_step_budget = constraint_bundle.max_step_budget
@@ -320,7 +341,7 @@ def retry_with_tighter_constraints(
             style_constraints.append(
                 "Restore the error on the exact local object the tutor is currently eliciting, not on a different step or answer type."
             )
-    return ConstraintBundle(
+    return BehaviorHarness(
         max_sentences=max_sentences,
         max_step_budget=max_step_budget,
         allow_direct_answer=allow_direct_answer,
@@ -345,12 +366,13 @@ def _generate_once(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     transition_prediction: StateTransitionPrediction,
     error_blueprint: ErrorBlueprint,
-    constraint_bundle: ConstraintBundle,
+    constraint_bundle: BehaviorHarness,
     llm_client: OpenAICompatClient,
     retry_note: str,
+    use_behavior_harness: bool = True,
 ) -> GeneratedStudentTurn:
     step_traces: list[TurnStepTrace] = []
     for step_index in range(1, constraint_bundle.max_step_budget + 1):
@@ -363,7 +385,6 @@ def _generate_once(
             "interaction_state": asdict(interaction_state),
             "transition_prediction": asdict(transition_prediction),
             "error_blueprint": asdict(error_blueprint),
-            "constraint_bundle": asdict(constraint_bundle),
             "existing_step_traces": [asdict(step) for step in step_traces],
             "retry_note": retry_note,
             "required_schema": {
@@ -372,6 +393,8 @@ def _generate_once(
                 "stop_dialogue": "boolean",
             },
         }
+        if use_behavior_harness:
+            payload["constraint_bundle"] = asdict(constraint_bundle)
         user_prompt = json.dumps(payload, ensure_ascii=False)
         parsed = llm_client.chat_json(
             system_prompt=(
@@ -386,7 +409,9 @@ def _generate_once(
             step_kind, step_text, stop_dialogue = _parse_student_turn_step(
                 parsed,
                 step_index=step_index,
-                final_step_index=constraint_bundle.max_step_budget,
+                final_step_index=(
+                    constraint_bundle.max_step_budget if use_behavior_harness else step_index
+                ),
             )
         except (KeyError, ValueError) as exc:
             repaired = llm_client.retry_schema_json(
@@ -403,7 +428,9 @@ def _generate_once(
             step_kind, step_text, stop_dialogue = _parse_student_turn_step(
                 repaired,
                 step_index=step_index,
-                final_step_index=constraint_bundle.max_step_budget,
+                final_step_index=(
+                    constraint_bundle.max_step_budget if use_behavior_harness else step_index
+                ),
             )
         step_traces.append(
             TurnStepTrace(
@@ -414,6 +441,22 @@ def _generate_once(
         )
         if step_kind == "finalize_turn":
             draft_turn = step_text
+            if not use_behavior_harness:
+                return GeneratedStudentTurn(
+                    pred_turn=draft_turn,
+                    draft_turn=draft_turn,
+                    stop_dialogue=stop_dialogue,
+                    step_traces=step_traces,
+                    violation_check=DynamicViolationCheck(
+                        has_violation=False,
+                        violation_types=[],
+                        rationale=["not reviewed; behavior harness disabled for ablation"],
+                        llm_review_used=False,
+                    ),
+                    retried=False,
+                    surface_realization=None,
+                    semantic_preservation=None,
+                )
             surface_realization = realize_student_surface_turn(
                 student_context_profile=student_context_profile,
                 context=context,

@@ -33,11 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="../XES3G5M/question_level/train_valid_sequences_quelevel.csv",
         help="Path to train/valid response csv, relative to xes root by default.",
     )
-    parser.add_argument("--min_item_response_count", type=int, default=300)
+    parser.add_argument("--min_item_response_count", type=int, default=500)
     parser.add_argument("--min_student_unique_items", type=int, default=50)
-    parser.add_argument("--min_level_response_count", type=int, default=20)
+    parser.add_argument("--min_level_response_count", type=int, default=100)
     parser.add_argument("--max_level_share", type=float, default=0.45)
-    parser.add_argument("--max_distribution_l1", type=float, default=0.30)
+    parser.add_argument("--max_distribution_l1", type=float, default=0.25)
     parser.add_argument(
         "--include_image_questions",
         action=argparse.BooleanOptionalAction,

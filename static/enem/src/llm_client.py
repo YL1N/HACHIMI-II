@@ -47,7 +47,14 @@ class OpenAICompatClient:
             "temperature": self._cfg.temperature,
             "max_tokens": self._cfg.max_tokens,
             "messages": messages,
+            # Disable model "thinking" so behaviour matches across endpoints. The two
+            # serving stacks read different keys: some serving stacks honour
+            # chat_template_kwargs.enable_thinking, while Alibaba DashScope's
+            # OpenAI-compatible API honours a top-level enable_thinking. Sending both is
+            # backward compatible (each stack ignores the key it does not recognise) and
+            # keeps thinking OFF on both, so the Qwen3.5-397B outputs stay comparable.
             "chat_template_kwargs": {"enable_thinking": False},
+            "enable_thinking": False,
         }
         if self._cfg.response_format_json:
             payload["response_format"] = {"type": "json_object"}

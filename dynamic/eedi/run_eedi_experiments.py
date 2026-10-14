@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import concurrent.futures
@@ -13,10 +13,12 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from src.constraint_bundle import compile_constraints
+from src.constraint_bundle import compile_behavior_harness
+from src.constraint_bundle import BehaviorHarness
 from src.data_loading import build_turn_prediction_tasks, load_eedi_dialogues
 from src.dialogue_context import build_dialogue_context_state
 from src.error_blueprint import build_error_blueprint
+from src.error_blueprint import ErrorBlueprint
 from src.evaluation_eedi import (
     append_jsonl,
     export_official_eval_csv,
@@ -25,10 +27,10 @@ from src.evaluation_eedi import (
 )
 from src.generation import generate_student_turn
 from src.llm_client import LLMConfig, OpenAICompatClient
-from src.population_calibration import (
-    build_population_calibration_summary,
-    load_population_calibration_bank,
-    population_calibration_summary_to_dict,
+from src.persona_prior import (
+    build_persona_prior_summary,
+    load_persona_bank,
+    persona_prior_summary_to_dict,
 )
 from src.revisit_controls import (
     apply_error_blueprint_revisit,
@@ -39,13 +41,14 @@ from src.revisit_controls import (
 )
 from src.runtime_paths import (
     EEDI_OUTPUTS_DIR,
-    EEDI_REPORTS_DIR,
     PROJECT_ROOT,
     resolve_eedi_path,
 )
 from src.student_model import build_student_context_profile
-from src.student_turn_state import resolve_interaction_state
+from src.student_turn_state import infer_task_local_state
+from src.student_turn_state import TaskLocalLearnerState
 from src.transition import predict_state_transition
+from src.transition import StateTransitionPrediction
 from src.tutor_turn_profile import build_tutor_turn_profile
 
 
@@ -79,11 +82,23 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_dialogues", type=int, default=10)
     parser.add_argument("--max_tasks", type=int, default=0)
     parser.add_argument(
+        "--task_index_start",
+        type=int,
+        default=0,
+        help="Inclusive zero-based task index after dialogue expansion and max_tasks slicing.",
+    )
+    parser.add_argument(
+        "--task_index_end",
+        type=int,
+        default=0,
+        help="Exclusive zero-based task index after dialogue expansion and max_tasks slicing. 0 means no upper bound.",
+    )
+    parser.add_argument(
         "--llm_total_concurrency_budget",
         type=int,
         default=0,
         help=(
-            "Total concurrency budget for the shared 9501/v1 endpoint. "
+            "Total concurrency budget for the shared OpenAI-compatible endpoint. "
             "Generation and judge run sequentially, so this is the per-stage cap."
         ),
     )
@@ -123,8 +138,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip automatic official evaluation after generation.",
     )
-    parser.add_argument("--population_calibration_bank_path", type=str, default="")
-    parser.add_argument("--population_calibration_top_k", type=int, default=0)
+    parser.add_argument("--persona_bank_path", type=str, default="")
+    parser.add_argument("--persona_matching_top_k", type=int, default=0)
     parser.add_argument(
         "--constraint_profile",
         type=str,
@@ -181,6 +196,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "structure_plus_wrong_claim_seed",
             "structure_plus_buggy_rule",
             "structure_no_mechanism",
+        ),
+    )
+    parser.add_argument(
+        "--ablation_mode",
+        type=str,
+        default="full",
+        choices=(
+            "full",
+            "without_hachimi_prior",
+            "without_task_local_state",
+            "without_behavior_harness",
         ),
     )
     parser.add_argument(
@@ -347,12 +373,21 @@ def main() -> None:
     )
     if args.max_tasks > 0:
         tasks = tasks[: args.max_tasks]
+    if args.task_index_start < 0:
+        raise ValueError("--task_index_start must be >= 0")
+    if args.task_index_end < 0:
+        raise ValueError("--task_index_end must be >= 0")
+    if args.task_index_end and args.task_index_end < args.task_index_start:
+        raise ValueError("--task_index_end must be >= --task_index_start")
+    if args.task_index_start or args.task_index_end:
+        end = args.task_index_end if args.task_index_end else len(tasks)
+        tasks = tasks[args.task_index_start : end]
     if not tasks:
         raise ValueError("no EEDI tasks selected for execution")
-    population_calibration_bank = (
-        load_population_calibration_bank(str(resolve_eedi_path(args.population_calibration_bank_path)))
-        if str(args.population_calibration_bank_path or "").strip()
-        and int(args.population_calibration_top_k or 0) > 0
+    persona_bank = (
+        load_persona_bank(str(resolve_eedi_path(args.persona_bank_path)))
+        if str(args.persona_bank_path or "").strip()
+        and int(args.persona_matching_top_k or 0) > 0
         else []
     )
 
@@ -382,6 +417,8 @@ def main() -> None:
             "dialogue_subjects_path": args.dialogue_subjects_path,
             "max_dialogues": args.max_dialogues,
             "max_tasks": args.max_tasks,
+            "task_index_start": args.task_index_start,
+            "task_index_end": args.task_index_end,
             "llm_total_concurrency_budget": args.llm_total_concurrency_budget,
             "max_concurrency_override": args.max_concurrency or None,
             "effective_generation_concurrency": args.effective_generation_concurrency,
@@ -405,8 +442,8 @@ def main() -> None:
             "embedding_retry_sleep_s": args.embedding_retry_sleep_s,
             "official_evaluations": args.official_evaluations,
             "official_eval_input": None,
-            "population_calibration_bank_path": args.population_calibration_bank_path,
-            "population_calibration_top_k": args.population_calibration_top_k,
+            "persona_bank_path": args.persona_bank_path,
+            "persona_matching_top_k": args.persona_matching_top_k,
             "constraint_profile": args.constraint_profile,
             "disable_llm_dynamic_violation_review": args.disable_llm_dynamic_violation_review,
             "disable_generation_retry": args.disable_generation_retry,
@@ -415,6 +452,7 @@ def main() -> None:
             "interaction_state_mode": args.interaction_state_mode,
             "transition_prediction_mode": args.transition_prediction_mode,
             "error_blueprint_mode": args.error_blueprint_mode,
+            "ablation_mode": args.ablation_mode,
             "retry_until_success": args.retry_until_success,
             "retry_sleep_s": args.retry_sleep_s,
             "max_retry_attempts": args.max_retry_attempts,
@@ -446,8 +484,8 @@ def main() -> None:
                         task_result = _execute_turn_prediction_task_until_success(
                             task=task,
                             llm_config=llm_config,
-                            population_calibration_bank=population_calibration_bank,
-                            population_calibration_top_k=int(args.population_calibration_top_k or 0),
+                            persona_bank=persona_bank,
+                            persona_matching_top_k=int(args.persona_matching_top_k or 0),
                             constraint_profile=str(args.constraint_profile),
                             disable_llm_dynamic_violation_review=bool(
                                 args.disable_llm_dynamic_violation_review
@@ -458,6 +496,7 @@ def main() -> None:
                             interaction_state_mode=str(args.interaction_state_mode),
                             transition_prediction_mode=str(args.transition_prediction_mode),
                             error_blueprint_mode=str(args.error_blueprint_mode),
+                            ablation_mode=str(args.ablation_mode),
                             retry_events_path=retry_events_path,
                             retry_sleep_s=float(args.retry_sleep_s),
                             max_retry_attempts=int(args.max_retry_attempts or 0),
@@ -467,8 +506,8 @@ def main() -> None:
                         task_result = _execute_turn_prediction_task(
                             task,
                             llm_config,
-                            population_calibration_bank,
-                            int(args.population_calibration_top_k or 0),
+                            persona_bank,
+                            int(args.persona_matching_top_k or 0),
                             str(args.constraint_profile),
                             bool(args.disable_llm_dynamic_violation_review),
                             bool(args.disable_generation_retry),
@@ -477,6 +516,7 @@ def main() -> None:
                             str(args.interaction_state_mode),
                             str(args.transition_prediction_mode),
                             str(args.error_blueprint_mode),
+                            str(args.ablation_mode),
                         )
                     task_result["record"]["gt_turn"] = ground_truth_by_key[task_result["task_key"]]
                 except Exception as exc:
@@ -512,8 +552,8 @@ def main() -> None:
                             _execute_turn_prediction_task_until_success,
                             task,
                             llm_config,
-                            population_calibration_bank,
-                            int(args.population_calibration_top_k or 0),
+                            persona_bank,
+                            int(args.persona_matching_top_k or 0),
                             str(args.constraint_profile),
                             bool(args.disable_llm_dynamic_violation_review),
                             bool(args.disable_generation_retry),
@@ -522,6 +562,7 @@ def main() -> None:
                             str(args.interaction_state_mode),
                             str(args.transition_prediction_mode),
                             str(args.error_blueprint_mode),
+                            str(args.ablation_mode),
                             retry_events_path,
                             float(args.retry_sleep_s),
                             int(args.max_retry_attempts or 0),
@@ -532,8 +573,8 @@ def main() -> None:
                             _execute_turn_prediction_task,
                             task,
                             llm_config,
-                            population_calibration_bank,
-                            int(args.population_calibration_top_k or 0),
+                            persona_bank,
+                            int(args.persona_matching_top_k or 0),
                             str(args.constraint_profile),
                             bool(args.disable_llm_dynamic_violation_review),
                             bool(args.disable_generation_retry),
@@ -542,6 +583,7 @@ def main() -> None:
                             str(args.interaction_state_mode),
                             str(args.transition_prediction_mode),
                             str(args.error_blueprint_mode),
+                            str(args.ablation_mode),
                         )
                     futures[future] = task
                 for future in concurrent.futures.as_completed(futures):
@@ -624,8 +666,8 @@ def main() -> None:
             "official_evaluations": args.official_evaluations,
             "official_eval_input": str(official_eval_input) if official_eval_input else None,
             "skip_official_eval": args.skip_official_eval,
-            "population_calibration_bank_path": args.population_calibration_bank_path,
-            "population_calibration_top_k": args.population_calibration_top_k,
+            "persona_bank_path": args.persona_bank_path,
+            "persona_matching_top_k": args.persona_matching_top_k,
             "constraint_profile": args.constraint_profile,
             "disable_llm_dynamic_violation_review": args.disable_llm_dynamic_violation_review,
             "disable_generation_retry": args.disable_generation_retry,
@@ -634,6 +676,7 @@ def main() -> None:
             "interaction_state_mode": args.interaction_state_mode,
             "transition_prediction_mode": args.transition_prediction_mode,
             "error_blueprint_mode": args.error_blueprint_mode,
+            "ablation_mode": args.ablation_mode,
             "retry_until_success": args.retry_until_success,
             "retry_sleep_s": args.retry_sleep_s,
             "max_retry_attempts": args.max_retry_attempts,
@@ -653,15 +696,14 @@ def main() -> None:
             embedding_retry_sleep_s=args.embedding_retry_sleep_s,
             llm_judge_batch_size=args.effective_llm_judge_batch_size,
         )
-    _write_build_report(run_dir)
     print(run_dir)
 
 
 def _execute_turn_prediction_task(
     task,
     llm_config: LLMConfig,
-    population_calibration_bank,
-    population_calibration_top_k: int,
+    persona_bank,
+    persona_matching_top_k: int,
     constraint_profile: str,
     disable_llm_dynamic_violation_review: bool,
     disable_generation_retry: bool,
@@ -670,6 +712,7 @@ def _execute_turn_prediction_task(
     interaction_state_mode: str,
     transition_prediction_mode: str,
     error_blueprint_mode: str,
+    ablation_mode: str = "full",
 ) -> dict[str, object]:
     llm_client = OpenAICompatClient(llm_config)
     context = build_dialogue_context_state(task)
@@ -678,62 +721,74 @@ def _execute_turn_prediction_task(
         tutor_profile,
         tutor_turn_profile_mode,
     )
-    population_calibration_summary = build_population_calibration_summary(
+    persona_prior_summary = build_persona_prior_summary(
         context=context,
         tutor_profile=tutor_profile,
-        exemplar_bank=population_calibration_bank,
-        top_k=population_calibration_top_k,
+        persona_bank=[] if ablation_mode == "without_hachimi_prior" else persona_bank,
+        top_k=0 if ablation_mode == "without_hachimi_prior" else persona_matching_top_k,
+        llm_client=llm_client if ablation_mode != "without_hachimi_prior" else None,
+        exclude_dialogue_id=task.dialogue_id,
     )
     student_context_profile = build_student_context_profile(
         context=context,
         llm_client=llm_client,
-        population_calibration_summary=population_calibration_summary,
+        persona_prior_summary=persona_prior_summary,
     )
     student_context_profile = apply_student_context_profile_revisit(
         student_context_profile,
         student_context_profile_mode,
     )
-    interaction_state = resolve_interaction_state(
-        student_context_profile=student_context_profile,
-        context=context,
-        tutor_profile=tutor_profile,
-        llm_client=llm_client,
-        population_calibration_summary=population_calibration_summary,
-    )
-    interaction_state = apply_interaction_state_revisit(
-        interaction_state,
-        interaction_state_mode,
-    )
-    transition_prediction = predict_state_transition(
-        student_context_profile=student_context_profile,
-        context=context,
-        tutor_profile=tutor_profile,
-        interaction_state=interaction_state,
-        llm_client=llm_client,
-        population_calibration_summary=population_calibration_summary,
-    )
-    transition_prediction = apply_transition_prediction_revisit(
-        transition_prediction,
-        transition_prediction_mode,
-    )
-    error_blueprint = build_error_blueprint(
-        student_context_profile=student_context_profile,
-        context=context,
-        tutor_profile=tutor_profile,
-        interaction_state=interaction_state,
-        transition_prediction=transition_prediction,
-        llm_client=llm_client,
-        population_calibration_summary=population_calibration_summary,
-    )
-    error_blueprint = apply_error_blueprint_revisit(
-        error_blueprint,
-        error_blueprint_mode,
-    )
-    constraint_bundle = compile_constraints(
-        prediction=transition_prediction,
-        error_blueprint=error_blueprint,
-        constraint_profile=constraint_profile,
-    )
+    if ablation_mode == "without_task_local_state":
+        interaction_state = _default_interaction_state_for_ablation()
+        transition_prediction = _default_transition_prediction_for_ablation()
+        error_blueprint = _default_error_blueprint_for_ablation()
+        constraint_bundle = _format_only_dynamic_constraints_for_ablation()
+    else:
+        interaction_state = infer_task_local_state(
+            student_context_profile=student_context_profile,
+            context=context,
+            tutor_profile=tutor_profile,
+            llm_client=llm_client,
+            persona_prior_summary=persona_prior_summary,
+        )
+        interaction_state = apply_interaction_state_revisit(
+            interaction_state,
+            interaction_state_mode,
+        )
+        transition_prediction = predict_state_transition(
+            student_context_profile=student_context_profile,
+            context=context,
+            tutor_profile=tutor_profile,
+            interaction_state=interaction_state,
+            llm_client=llm_client,
+            persona_prior_summary=persona_prior_summary,
+        )
+        transition_prediction = apply_transition_prediction_revisit(
+            transition_prediction,
+            transition_prediction_mode,
+        )
+        error_blueprint = build_error_blueprint(
+            student_context_profile=student_context_profile,
+            context=context,
+            tutor_profile=tutor_profile,
+            interaction_state=interaction_state,
+            transition_prediction=transition_prediction,
+            llm_client=llm_client,
+            persona_prior_summary=persona_prior_summary,
+        )
+        error_blueprint = apply_error_blueprint_revisit(
+            error_blueprint,
+            error_blueprint_mode,
+        )
+        constraint_bundle = (
+            _format_only_dynamic_constraints_for_ablation()
+            if ablation_mode == "without_behavior_harness"
+            else compile_behavior_harness(
+                prediction=transition_prediction,
+                error_blueprint=error_blueprint,
+                constraint_profile=constraint_profile,
+            )
+        )
     generated_turn = generate_student_turn(
         student_context_profile=student_context_profile,
         context=context,
@@ -745,12 +800,13 @@ def _execute_turn_prediction_task(
         llm_client=llm_client,
         use_llm_dynamic_violation_review=not disable_llm_dynamic_violation_review,
         use_generation_retry=not disable_generation_retry,
+        use_behavior_harness=ablation_mode != "without_behavior_harness",
     )
     trace_rows = [
         _build_trace_row(
             task=task,
-            stage="population_calibration_summary",
-            payload=population_calibration_summary_to_dict(population_calibration_summary),
+            stage="persona_prior_summary",
+            payload=persona_prior_summary_to_dict(persona_prior_summary),
         ),
         _build_trace_row(
             task=task,
@@ -820,8 +876,8 @@ def _execute_turn_prediction_task(
         "student_context_profile": asdict(student_context_profile),
         "dialogue_context": asdict(context),
         "tutor_turn_profile": asdict(tutor_profile),
-        "population_calibration_summary": population_calibration_summary_to_dict(
-            population_calibration_summary
+        "persona_prior_summary": persona_prior_summary_to_dict(
+            persona_prior_summary
         ),
         "interaction_state": asdict(interaction_state),
         "state_transition_prediction": asdict(transition_prediction),
@@ -836,6 +892,13 @@ def _execute_turn_prediction_task(
             "interaction_state_mode": interaction_state_mode,
             "transition_prediction_mode": transition_prediction_mode,
             "error_blueprint_mode": error_blueprint_mode,
+            "ablation_mode": ablation_mode,
+            "dynamic_hachimi_prior_status": (
+                "hachimi_1m_persona_prior_disabled"
+                if ablation_mode == "without_hachimi_prior"
+                else "hachimi_1m_persona_prior_enabled"
+            ),
+            "behavior_harness_used_in_generation": ablation_mode != "without_behavior_harness",
         },
         "step_traces": [asdict(step) for step in generated_turn.step_traces],
         "violation_check": asdict(generated_turn.violation_check),
@@ -857,11 +920,84 @@ def _execute_turn_prediction_task(
     }
 
 
+def _default_interaction_state_for_ablation() -> TaskLocalLearnerState:
+    return TaskLocalLearnerState(
+        competence_position="within_zpd",
+        misconception_status="not_salient",
+        metacognitive_regulation_state="weak_monitoring",
+        help_internalization_state="surface_uptake",
+        help_seeking_state="help_ambivalent",
+        attempt_readiness="ready_for_local_attempt",
+        engagement_form="Active",
+        response_commitment_state="tentative",
+        response_maturity_cap="brief_local_explanation",
+        state_evidence=[
+            "ablation=without_task_local_state",
+            "neutral dynamic default; no task-local learner state inferred",
+        ],
+    )
+
+
+def _default_transition_prediction_for_ablation() -> StateTransitionPrediction:
+    return StateTransitionPrediction(
+        predicted_next_competence_position="within_zpd",
+        predicted_next_misconception_status="not_salient",
+        predicted_next_metacognitive_regulation_state="weak_monitoring",
+        predicted_next_help_internalization_state="surface_uptake",
+        predicted_next_help_seeking_state="help_ambivalent",
+        predicted_next_attempt_readiness="ready_for_local_attempt",
+        predicted_next_engagement_form="Active",
+        predicted_next_response_commitment_state="tentative",
+        predicted_next_response_maturity_cap="brief_local_explanation",
+        predicted_misconception_trajectory_shift="hold_trajectory",
+        transition_rationale=[
+            "ablation=without_task_local_state",
+            "neutral dynamic default; no state transition inferred from current tutor turn",
+        ],
+    )
+
+
+def _default_error_blueprint_for_ablation() -> ErrorBlueprint:
+    return ErrorBlueprint(
+        error_presence="no_specific_error",
+        newman_error_locus=None,
+        radatz_error_mechanism=None,
+        buggy_rule=None,
+        wrong_claim_seed=None,
+        blueprint_evidence=[
+            "ablation=without_task_local_state",
+            "neutral dynamic default; no local error blueprint inferred",
+        ],
+    )
+
+
+def _format_only_dynamic_constraints_for_ablation() -> BehaviorHarness:
+    return BehaviorHarness(
+        max_sentences=4,
+        max_step_budget=2,
+        allow_direct_answer=True,
+        allow_full_reasoning=True,
+        allow_help_seeking_language=True,
+        must_preserve_local_confusion=False,
+        must_preserve_misconception_continuity=False,
+        expected_error_presence="no_specific_error",
+        expected_newman_error_locus=None,
+        expected_radatz_error_mechanism=None,
+        buggy_rule=None,
+        wrong_claim_seed=None,
+        must_realize_specific_error=False,
+        must_anchor_to_local_wrong_claim=False,
+        required_commitment_style="any",
+        forbidden_patterns=[],
+        style_constraints=[],
+    )
+
+
 def _execute_turn_prediction_task_until_success(
     task,
     llm_config: LLMConfig,
-    population_calibration_bank,
-    population_calibration_top_k: int,
+    persona_bank,
+    persona_matching_top_k: int,
     constraint_profile: str,
     disable_llm_dynamic_violation_review: bool,
     disable_generation_retry: bool,
@@ -870,6 +1006,7 @@ def _execute_turn_prediction_task_until_success(
     interaction_state_mode: str,
     transition_prediction_mode: str,
     error_blueprint_mode: str,
+    ablation_mode: str,
     retry_events_path: Path,
     retry_sleep_s: float,
     max_retry_attempts: int,
@@ -882,8 +1019,8 @@ def _execute_turn_prediction_task_until_success(
             task_result = _execute_turn_prediction_task(
                 task=task,
                 llm_config=llm_config,
-                population_calibration_bank=population_calibration_bank,
-                population_calibration_top_k=population_calibration_top_k,
+                persona_bank=persona_bank,
+                persona_matching_top_k=persona_matching_top_k,
                 constraint_profile=constraint_profile,
                 disable_llm_dynamic_violation_review=disable_llm_dynamic_violation_review,
                 disable_generation_retry=disable_generation_retry,
@@ -892,6 +1029,7 @@ def _execute_turn_prediction_task_until_success(
                 interaction_state_mode=interaction_state_mode,
                 transition_prediction_mode=transition_prediction_mode,
                 error_blueprint_mode=error_blueprint_mode,
+                ablation_mode=ablation_mode,
             )
             task_result["record"]["task_retry_attempts"] = attempt
             return task_result
@@ -1010,50 +1148,6 @@ def _persist_task_failure(
     )
 
 
-def _write_build_report(run_dir: Path) -> None:
-    report_path = EEDI_REPORTS_DIR / "eedi_longchain_build_report.md"
-    lines = [
-        "# EEDI 长链路实现报告",
-        "",
-        "## 本次实现覆盖了什么",
-        "",
-        "- 按 `dynamic/eedi/重构.md` 把 `DialogueContext -> StudentContextProfile -> TutorMoveProfile -> InteractionState -> StateTransitionPrediction -> ConstraintBundle -> StudentTurnGeneration -> DynamicViolationCheck -> Optional One-Step Retry` 主链跑通。",
-        "- 所有核心 prompt 集中在 `dynamic/eedi/src/prompts.py`。",
-        "- 生成阶段改成严格单步协议，只有最后一步允许输出最终 `student turn`。",
-        "- 每个样本的阶段对象和生成轨迹都会实时落到 `stage_traces.jsonl`。",
-        "- 加入了硬规则动态失真检查、边界样本 LLM 复核、一次局部重试。",
-        "",
-        "## 这次修改改变了哪个对象或哪个环节",
-        "",
-        "1. 把原来的简化 `student_model` 改成 `StudentContextProfile`，不再直接压成 low/medium/high 稳定人格标签。",
-        "2. 把原来的简化 `student_turn_state` 改成文档要求的 `InteractionState`。",
-        "3. 新增 `StateTransitionPrediction` 和 `ConstraintBundle`，避免从状态直接旁路到回复。",
-        "4. 把生成器改成单步协议 + 违例检查 + 一次重试。",
-        "",
-        "## 理论依据",
-        "",
-        "- `StudentContextProfile` 用 Bandura / Zimmerman / Pekrun 做描述性分析，用 ICAP 做原生参与层级。",
-        "- `TutorTurnProfile` 受 ZPD / scaffolding 约束。",
-        "- `InteractionState` 和 `StateTransitionPrediction` 体现第三人称状态解析与渐进转移。",
-        "- `DynamicViolationCheck` 聚焦三类失真：过快跃迁、错误路径断裂、成熟化过度。",
-        "",
-        "## 怎么避免作弊",
-        "",
-        "- generation path 只吃当前题、历史对话、当前 tutor turn、第三人称状态与转移、规则编译约束。",
-        "- 没有把 gold next student turn、官方 act/correctness/kcs/persona 标注带入生成链。",
-        "- 没有做题号特判、模板特判、目标指标回调。",
-        "",
-        "## 输出位置",
-        "",
-        f"- 最近一次运行输出目录：`{run_dir}`",
-        "- 实时阶段轨迹：`stage_traces.jsonl`",
-        "- 最终预测：`predictions.jsonl` / `turn_level_predictions.csv`",
-        "- 聚合指标：`metrics.json`",
-    ]
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
 def _load_existing_records(predictions_path: Path) -> list[dict[str, object]]:
     if not predictions_path.exists():
         return []
@@ -1115,7 +1209,7 @@ def _run_official_eval(
 ) -> None:
     cmd = [
         sys.executable,
-        str(PROJECT_ROOT / "dynamic/eedi/run_official_eval_with_qwen.py"),
+        str(PROJECT_ROOT / "dynamic/eedi/run_official_eval.py"),
         "--input_file",
         str(official_eval_input),
         "--evaluations",
@@ -1171,7 +1265,7 @@ def _preflight_official_eval_requirements(
 ) -> None:
     cmd = [
         sys.executable,
-        str(PROJECT_ROOT / "dynamic/eedi/run_official_eval_with_qwen.py"),
+        str(PROJECT_ROOT / "dynamic/eedi/run_official_eval.py"),
         "--evaluations",
         evaluations,
         "--preflight_only",

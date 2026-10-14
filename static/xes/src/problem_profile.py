@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
-from .difficulty_anchor_bank import DifficultyAnchorContext
 from .llm_client import OpenAICompatClient
-from .prompts import PROBLEM_PROFILE_PROMPT, PROBLEM_PROFILE_WITH_DIFFICULTY_ANALYSIS_PROMPT
+from .prompts import PROBLEM_PROFILE_PROMPT
 
 
 @dataclass(frozen=True)
@@ -22,10 +21,6 @@ class ProblemRequirementProfile:
     response_format_demand: str
     guessability: str
     notes: list[str]
-    perceived_difficulty_for_target_grade: str | None = None
-    perceived_difficulty_justification: str | None = None
-    real_difficulty_band: str | None = None  # For H2 experiment: directly pass real difficulty
-    difficulty_anchor_context: dict[str, Any] | None = None
 
 
 def _validate_enum(
@@ -81,20 +76,10 @@ def _build_problem_requirement_profile_with_llm(
     options: dict[str, str],
     question_type: str,
     llm_client: OpenAICompatClient,
-    target_grade: str | None = None,
-    enable_difficulty_analysis: bool = False,
-    difficulty_anchor_context: DifficultyAnchorContext | None = None,
 ) -> ProblemRequirementProfile:
     knowledge_integration_aliases = {
         "single_knowledge_combination": "single_knowledge",
     }
-
-    # Choose prompt based on whether difficulty analysis is enabled
-    system_prompt = (
-        PROBLEM_PROFILE_WITH_DIFFICULTY_ANALYSIS_PROMPT
-        if enable_difficulty_analysis
-        else PROBLEM_PROFILE_PROMPT
-    )
 
     user_payload = {
         "question_text": question_text,
@@ -121,22 +106,9 @@ def _build_problem_requirement_profile_with_llm(
             "notes": "list[str]",
         },
     }
-    anchor_context_payload = (
-        asdict(difficulty_anchor_context)
-        if difficulty_anchor_context is not None
-        else None
-    )
-    if anchor_context_payload is not None:
-        user_payload["difficulty_anchor_context"] = anchor_context_payload
-
-    # Add target_grade and difficulty fields if enabled
-    if enable_difficulty_analysis and target_grade:
-        user_payload["target_grade"] = target_grade
-        user_payload["required_output_schema"]["perceived_difficulty_for_target_grade"] = "easy|medium|hard"
-        user_payload["required_output_schema"]["perceived_difficulty_justification"] = "string"
 
     parsed = llm_client.chat_json(
-        system_prompt=system_prompt,
+        system_prompt=PROBLEM_PROFILE_PROMPT,
         user_prompt=json.dumps(user_payload, ensure_ascii=False),
     )
     # notes is optional, allow empty list
@@ -145,22 +117,6 @@ def _build_problem_requirement_profile_with_llm(
         notes = []
     else:
         notes = _validate_str_list(notes_raw, "notes")
-
-    # Extract difficulty fields if present
-    perceived_difficulty = None
-    perceived_difficulty_justification = None
-    if enable_difficulty_analysis:
-        if "perceived_difficulty_for_target_grade" in parsed:
-            perceived_difficulty = _validate_enum(
-                parsed.get("perceived_difficulty_for_target_grade"),
-                {"easy", "medium", "hard"},
-                "perceived_difficulty_for_target_grade",
-            )
-        if "perceived_difficulty_justification" in parsed:
-            perceived_difficulty_justification = _validate_str(
-                parsed.get("perceived_difficulty_justification"),
-                "perceived_difficulty_justification",
-            )
 
     return ProblemRequirementProfile(
         prerequisite_knowledge=_validate_str_list(
@@ -216,10 +172,6 @@ def _build_problem_requirement_profile_with_llm(
             "guessability",
         ),
         notes=notes,
-        perceived_difficulty_for_target_grade=perceived_difficulty,
-        perceived_difficulty_justification=perceived_difficulty_justification,
-        real_difficulty_band=None,
-        difficulty_anchor_context=anchor_context_payload,
     )
 
 
@@ -228,43 +180,15 @@ def build_problem_requirement_profile(
     options: dict[str, str],
     question_type: str,
     llm_client: OpenAICompatClient | None = None,
-    target_grade: str | None = None,
-    enable_difficulty_analysis: bool = False,
-    real_difficulty_band: str | None = None,
-    difficulty_anchor_context: DifficultyAnchorContext | None = None,
 ) -> ProblemRequirementProfile:
     if llm_client is None:
         raise ValueError(
             "build_problem_requirement_profile requires llm_client; semantic analysis cannot use heuristic fallback"
         )
 
-    profile = _build_problem_requirement_profile_with_llm(
+    return _build_problem_requirement_profile_with_llm(
         question_text=question_text,
         options=options,
         question_type=question_type,
         llm_client=llm_client,
-        target_grade=target_grade,
-        enable_difficulty_analysis=enable_difficulty_analysis,
-        difficulty_anchor_context=difficulty_anchor_context,
     )
-
-    # For H2 experiment: directly inject real difficulty band
-    if real_difficulty_band is not None:
-        profile = ProblemRequirementProfile(
-            prerequisite_knowledge=profile.prerequisite_knowledge,
-            operation_complexity=profile.operation_complexity,
-            operation_complexity_justification=profile.operation_complexity_justification,
-            abstraction_level=profile.abstraction_level,
-            abstraction_level_justification=profile.abstraction_level_justification,
-            knowledge_integration_demand=profile.knowledge_integration_demand,
-            representation_shift_required=profile.representation_shift_required,
-            response_format_demand=profile.response_format_demand,
-            guessability=profile.guessability,
-            notes=profile.notes,
-            perceived_difficulty_for_target_grade=profile.perceived_difficulty_for_target_grade,
-            perceived_difficulty_justification=profile.perceived_difficulty_justification,
-            real_difficulty_band=real_difficulty_band,
-            difficulty_anchor_context=profile.difficulty_anchor_context,
-        )
-
-    return profile

@@ -8,7 +8,8 @@ from .student_model import StudentModel
 
 _LEVEL_TO_SCORE = {"low": 0, "medium": 1, "high": 2}
 _DEMAND_TO_SCORE = {"none": 0, "low": 0, "medium": 1, "high": 2}
-_DIFFICULTY_TO_SCORE = {"easy": 0, "medium": 1, "hard": 2}
+# No item difficulty estimate enters the decision, so this term of the load stays at its middle value.
+_NEUTRAL_DIFFICULTY_LOAD = 1
 
 
 @dataclass(frozen=True)
@@ -27,16 +28,6 @@ def _capability_score(value: str) -> int:
     if text not in _LEVEL_TO_SCORE:
         raise ValueError(f"unsupported capability level: {value!r}")
     return _LEVEL_TO_SCORE[text]
-
-
-def _difficulty_score(profile: ProblemRequirementProfile) -> int:
-    difficulty = profile.real_difficulty_band or profile.perceived_difficulty_for_target_grade
-    if difficulty is None:
-        return 1
-    text = str(difficulty).strip().lower()
-    if text not in _DIFFICULTY_TO_SCORE:
-        return 1
-    return _DIFFICULTY_TO_SCORE[text]
 
 
 def _operation_load(profile: ProblemRequirementProfile) -> int:
@@ -95,7 +86,7 @@ def build_student_item_interaction_decision(
     operation_load = _operation_load(profile)
     abstraction_load = _abstraction_load(profile)
     format_load = _format_load(profile)
-    difficulty_load = _difficulty_score(profile)
+    difficulty_load = _NEUTRAL_DIFFICULTY_LOAD
     guessability_load = _guessability_load(profile)
 
     if profile.response_format_demand == "selection_only":

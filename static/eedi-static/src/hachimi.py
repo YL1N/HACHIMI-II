@@ -357,9 +357,12 @@ def select_hachimi_match_with_llm(
     observed_profile: dict[str, Any],
     candidates: list[HachimiCandidate],
     llm: Any,
+    max_attempts: int = 3,
 ) -> HachimiMatch:
     if not candidates:
         raise ValueError("candidates cannot be empty")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be >= 1")
     candidate_by_id = {candidate.hachimi_id: candidate for candidate in candidates}
     if len(candidate_by_id) != len(candidates):
         raise ValueError("candidate hachimi ids must be unique")
@@ -388,30 +391,36 @@ Return JSON with:
 - conflict_evidence: list[str]. Use [] only if there is no meaningful conflict.
 - fusion_rule: string describing how EEDI evidence and HACHIMI persona should be fused downstream
 """
-    parsed = llm.chat_json(
-        "You are a careful educational profile matching component. Return exactly one JSON object.",
-        prompt,
-    )
-    selected_id = str(parsed.get("selected_hachimi_id", "")).strip()
-    if selected_id not in candidate_by_id:
-        raise ValueError(
-            "selected_hachimi_id must be one of "
-            f"{sorted(candidate_by_id)}, got {selected_id!r}"
-        )
-    selected = candidate_by_id[selected_id]
-    return HachimiMatch(
-        student_id=str(observed_profile["student_id"]),
-        hachimi_id=selected.hachimi_id,
-        match_score=selected.rank_score,
-        matcher_version="llm_profile_matcher_v1",
-        candidate_hachimi_ids=[candidate.hachimi_id for candidate in candidates],
-        eedi_observed_profile=observed_profile,
-        raw_hachimi_persona=selected.raw_hachimi_persona,
-        hachimi_profile_card=selected.hachimi_profile_card,
-        match_evidence=_string_list(parsed.get("match_evidence"), "match_evidence"),
-        conflict_evidence=_string_list(parsed.get("conflict_evidence", []), "conflict_evidence", min_len=0),
-        fusion_rule=_non_empty_string(parsed.get("fusion_rule"), "fusion_rule"),
-    )
+    last_error: Exception | None = None
+    for _attempt in range(max_attempts):
+        try:
+            parsed = llm.chat_json(
+                "You are a careful educational profile matching component. Return exactly one JSON object.",
+                prompt,
+            )
+            selected_id = str(parsed.get("selected_hachimi_id", "")).strip()
+            if selected_id not in candidate_by_id:
+                raise ValueError(
+                    "selected_hachimi_id must be one of "
+                    f"{sorted(candidate_by_id)}, got {selected_id!r}"
+                )
+            selected = candidate_by_id[selected_id]
+            return HachimiMatch(
+                student_id=str(observed_profile["student_id"]),
+                hachimi_id=selected.hachimi_id,
+                match_score=selected.rank_score,
+                matcher_version="llm_profile_matcher_v1",
+                candidate_hachimi_ids=[candidate.hachimi_id for candidate in candidates],
+                eedi_observed_profile=observed_profile,
+                raw_hachimi_persona=selected.raw_hachimi_persona,
+                hachimi_profile_card=selected.hachimi_profile_card,
+                match_evidence=_string_list(parsed.get("match_evidence"), "match_evidence"),
+                conflict_evidence=_string_list(parsed.get("conflict_evidence", []), "conflict_evidence", min_len=0),
+                fusion_rule=_non_empty_string(parsed.get("fusion_rule"), "fusion_rule"),
+            )
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"HACHIMI LLM match failed after {max_attempts} attempt(s)") from last_error
 
 
 def match_hachimi_persona(observed_profile: dict[str, Any], personas: list[HachimiPersona]) -> HachimiMatch:

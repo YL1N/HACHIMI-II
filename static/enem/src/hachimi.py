@@ -240,9 +240,15 @@ def select_hachimi_match_with_llm(
     observed_profile: dict[str, Any],
     candidates: list[HachimiCandidate],
     llm: OpenAICompatClient,
+    max_attempts: int = 3,
 ) -> HachimiMatch:
     if not candidates:
         raise ValueError("candidates cannot be empty")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be >= 1")
+    by_id = {candidate.hachimi_id: candidate for candidate in candidates}
+    if len(by_id) != len(candidates):
+        raise ValueError("candidate hachimi ids must be unique")
     payload = {
         "observed_enem_profile": observed_profile,
         "candidate_hachimi_profiles": [
@@ -262,29 +268,34 @@ def select_hachimi_match_with_llm(
             "If HACHIMI conflicts with ENEM evidence, keep the conflict visible."
         ),
     }
-    parsed = llm.chat_json(
-        system_prompt=(
-            "Select the best HACHIMI persona match for an ENEM natural-science student simulation. "
-            "Return exactly one JSON object. Do not use hidden test answers."
-        ),
-        user_prompt=json.dumps(payload, ensure_ascii=False),
-    )
-    selected_id = str(parsed.get("selected_hachimi_id") or "").strip()
-    by_id = {candidate.hachimi_id: candidate for candidate in candidates}
-    if selected_id not in by_id:
-        raise ValueError(f"selected_hachimi_id={selected_id!r} not in candidates")
-    selected = by_id[selected_id]
-    return HachimiMatch(
-        student_id=str(observed_profile["student_id"]),
-        hachimi_id=selected.hachimi_id,
-        matcher_version="enem_llm_profile_matcher_v1",
-        candidate_hachimi_ids=[candidate.hachimi_id for candidate in candidates],
-        hachimi_profile_card=selected.hachimi_profile_card,
-        raw_hachimi_persona=selected.raw_persona,
-        match_evidence=[str(item) for item in parsed.get("match_evidence", selected.evidence)],
-        conflict_evidence=[str(item) for item in parsed.get("conflict_evidence", selected.conflict_evidence)],
-        fusion_rule=str(parsed.get("fusion_rule") or payload["fusion_rule"]),
-    )
+    last_error: Exception | None = None
+    for _attempt in range(max_attempts):
+        try:
+            parsed = llm.chat_json(
+                system_prompt=(
+                    "Select the best HACHIMI persona match for an ENEM natural-science student simulation. "
+                    "Return exactly one JSON object. Do not use hidden test answers."
+                ),
+                user_prompt=json.dumps(payload, ensure_ascii=False),
+            )
+            selected_id = str(parsed.get("selected_hachimi_id") or "").strip()
+            if selected_id not in by_id:
+                raise ValueError(f"selected_hachimi_id={selected_id!r} not in candidates")
+            selected = by_id[selected_id]
+            return HachimiMatch(
+                student_id=str(observed_profile["student_id"]),
+                hachimi_id=selected.hachimi_id,
+                matcher_version="enem_llm_profile_matcher_v1",
+                candidate_hachimi_ids=[candidate.hachimi_id for candidate in candidates],
+                hachimi_profile_card=selected.hachimi_profile_card,
+                raw_hachimi_persona=selected.raw_persona,
+                match_evidence=[str(item) for item in parsed.get("match_evidence", selected.evidence)],
+                conflict_evidence=[str(item) for item in parsed.get("conflict_evidence", selected.conflict_evidence)],
+                fusion_rule=str(parsed.get("fusion_rule") or payload["fusion_rule"]),
+            )
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"HACHIMI LLM match failed after {max_attempts} attempt(s)") from last_error
 
 
 def deterministic_hachimi_match(

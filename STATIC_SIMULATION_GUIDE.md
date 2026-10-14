@@ -1,222 +1,192 @@
-# 静态学生模拟方法说明
-
-## 1. 这份文档讲什么
-
-这份文档讲的是：
-
-> 当任务是“给定学生历史和当前题目，只预测这道题上的学生作答”时，我们的方法应该怎么设计。
-
-这里说的是**静态模拟方法本身**，不是某次消融实验报告。
-
-在本仓库里，这套静态方法的实际落地实例是 XES。
-
----
-
-## 2. 静态模拟要解决什么问题
-
-静态模拟面对的是单题、单步、一次性预测。
-
-典型问题是：
-
-> 给定一个学生和一道题，这个学生此刻会怎么答？
-
-关键不在于“让模型像学生一样说话”，而在于：
-
-- 这道题他大概率会不会做；
-- 如果不会，错会落在哪个局部点；
-- 回答会成熟到什么程度；
-- 回答是否符合这个学生当前能力边界。
-
----
-
-## 3. 我们的方法不是直接扮演学生
-
-我们不做：
-
-`学生历史/题目 -> 直接学生回答`
-
-我们做的是：
-
-`学生历史/题目 -> 第三人称状态 -> 生成约束 -> 学生回答`
-
-也就是：
-
-1. 先根据学生和题目做第三人称判断；
-2. 再把这个判断翻译成回答边界；
-3. 最后才生成学生答案。
-
-所以它不是 prompt 版角色扮演，而是**状态约束下的静态学生作答模拟**。
-
----
-
-## 4. 静态方法的通用骨架
-
-静态模拟的通用骨架可以写成：
-
-`StudentModel -> ProblemRequirementProfile -> ItemResponseState -> ConstraintBundle -> Response`
-
-它们分别回答：
-
-- `StudentModel`：这个学生平时是什么样；
-- `ProblemRequirementProfile`：这道题真正要求什么；
-- `ItemResponseState`：这个学生遇到这道题时，当前最可能处在什么状态；
-- `ConstraintBundle`：这种状态下，回答最多能表现到什么程度；
-- `Response`：最后生成出来的学生回答。
-
-如果再写得更抽象一点，就是：
-
-`Context -> State -> Constraint -> Action`
-
-其中：
-
-- `Context`：学生历史 + 当前题目；
-- `State`：学生-题目交互状态；
-- `Constraint`：回答边界；
-- `Action`：当前题目的学生作答。
-
----
-
-## 5. 静态方法里每一层到底在做什么
-
-### 5.1 StudentModel
-
-这一层建模的是学生本身。
-
-它不是只给一个“强 / 弱”标签，而是尽量回答：
-
-- 这个学生大概掌握哪些东西；
-- 遇到不同难度题时表现如何；
-- 容易在哪类任务上掉链子；
-- 回答风格是直接、犹豫，还是偏片段化。
-
-### 5.2 ProblemRequirementProfile
-
-这一层建模的是题目要求。
-
-它不是复述题面，而是把题目转成能力要求，比如：
-
-- 需要哪些前置知识；
-- 是一步题还是多步题；
-- 是否需要表征转换；
-- 是否对格式敏感；
-- 是否容易靠猜测蒙对。
-
-### 5.3 ItemResponseState
-
-这一层是最核心的第三人称状态层。
-
-它回答：
-
-- 这道题对这个学生是否可达；
-- 更像会做对、接近做对，还是容易做错；
-- 如果出错，错更可能是什么性质；
-- 当前回答应该是完整作答、局部尝试，还是不成熟片段。
-
-### 5.4 ConstraintBundle
-
-这一层把状态翻译成生成边界。
-
-它规定的不是“正确答案是什么”，而是：
-
-- 最多说多完整；
-- 能不能直接给结论；
-- 要不要保留不确定性；
-- 能不能表现出具体错误；
-- 哪些越界行为不允许发生。
-
-### 5.5 Response
-
-最后才生成当前题目的学生回答。
-
-这一步只负责**把前面的状态和边界外显出来**，而不是重新自由解题。
-
----
-
-## 6. 静态方法的最终实践版本
-
-在本仓库里，静态方法的实践实例是 XES。
-
-当前最终版不是最早的 baseline，而是：
-
-- 保留完整第三人称状态链；
-- 不再把 difficulty 信号直接送进 generation path；
-- 放松过紧的回答约束。
-
-它对应的最终版本名是：
-
-- `hachimi_no_difficulty_signal_loose_constraints`
-
-这说明一件事：
-
-> 静态方法真正必须保留的是第三人称状态层，不是把越多辅助提示都塞进生成链越好。
-
----
-
-## 7. 静态方法的输入和输出
-
-### 7.1 输入
-
-静态模拟的输入通常包括：
-
-- 学生历史作答；
-- 学生画像；
-- 当前题目；
-- 题目元数据。
-
-### 7.2 输出
-
-静态模拟的输出通常包括：
-
-- 当前题目的学生回答；
-- 中间状态对象；
-- 题目要求对象；
-- 生成约束对象；
-- 离线评测结果。
-
-这里中间对象很重要，因为它们决定了：
-
-> 我们不是只拿一个答案，而是拿到一条可审计的方法链。
-
----
-
-## 8. 静态方法的边界
-
-允许：
-
-- 用学生历史做学生建模；
-- 用题目结构做题目建模；
-- 用第三人称状态层做学生-题目交互判断；
-- 在边界内生成答案。
-
-不允许：
-
-- 直接把标准答案塞进生成链；
-- 把真实标签塞进生成链；
-- 跳过状态层直接 role-play；
-- 用题号或学生号做特判；
-- 生成后再为了指标改答案。
-
----
-
-## 9. 这套静态方法适合迁移到什么任务
-
-只要你的任务满足下面这个结构，就可以套这套静态方法：
-
-- 样本是相对独立的；
-- 每次只预测一个局部学生行为；
-- 重点是“这个学生面对这个任务会怎么做”；
-- 不需要在同一条长链里持续更新很多轮状态。
-
-除了 XES，这套方法也可以迁移到：
-
-- 单题作答预测；
-- 单步学习动作预测；
-- 单轮教育交互里的局部反应预测。
-
----
-
-## 10. 一句话总结
-
-静态学生模拟方法的本质是：
-
-> 先把学生状态和题目要求做成第三人称中间层，再把中间层翻译成生成边界，最后只生成当前这道题上的学生回答。
+# Static student simulation
+
+## Scope
+
+This note describes the method used for the *static* setting: given a student's
+history and a single target item, predict only that student's response on that
+item. It is a one-shot, single-item prediction rather than a multi-turn
+interaction. In this repository the static method is instantiated on XES3G5M,
+Eedi (static), and ENEM.
+
+## What the static setting predicts
+
+For a given student and a given item:
+
+- whether the student is likely to reach a correct answer,
+- if not, where the local breakdown is most likely to occur,
+- how mature or complete the response will be,
+- whether the response stays within the student's current ability boundary.
+
+The goal is not to make the model "talk like a student"; it is to keep the
+predicted response consistent with the student's inferred state on this item.
+
+## Method
+
+The static method does not map `history/item -> student answer` directly.
+Instead it runs:
+
+```
+history/item -> third-person state -> generation constraints -> student answer
+```
+
+The pipeline stages, in the order the entry scripts run them, are:
+
+```
+history -> observed profile -> persona candidate ranking -> persona selection
+        -> StudentModel -> StudentInternalSignals
+item    -> ProblemRequirementProfile
+        -> StudentItemInteractionDecision -> ItemResponseState -> ConstraintBundle -> Response -> evaluation
+```
+
+which abstracts to `Context -> State -> Constraint -> Action`:
+
+- Persona matching: a rule-based ranker keeps the top 8 persona candidates for
+  the observed profile, and the model selects one of them
+  (`llm_profile_matcher_v1`). The selected persona is fused with the observed
+  profile.
+- `StudentModel`: a durable third-person description of the student built from
+  prior history and the matched persona (mastered content, behaviour across
+  difficulty levels, typical failure modes, response style).
+- `StudentInternalSignals`: a compact set of signals the model derives from the
+  `StudentModel` for the later stages.
+- `ProblemRequirementProfile`: what the item actually demands (prerequisites,
+  single- vs multi-step, representation shifts, format sensitivity,
+  guessability), not a restatement of the prompt. It is built once per item.
+- `StudentItemInteractionDecision`: a prior on how this student meets this item
+  (reachability, correctness band, likely error family, confidence and
+  explanation caps). XES computes it by rule from the capability profile and
+  the item profile; Eedi and ENEM obtain it from the model.
+- `ItemResponseState`: the core third-person state layer — prerequisite
+  familiarity, response state, reachable level, error path, commitment
+  tendency, explanation-depth cap, and response-style guidance.
+- `ConstraintBundle`: the state compiled by a fixed function into generation
+  boundaries (`must_commit_answer`, `allow_complete_explanation`,
+  `max_sentences`, `max_thinking_steps`, `forbid_full_mastery`,
+  `preferred_error_path`, `style_constraints`, `allowed_commitment`, and, for
+  Eedi and ENEM, `output_answer_space`).
+- `Response`: the item-level student answer (`predicted_answer` and
+  `student_response`), which only externalizes the state and constraints above
+  rather than solving the item freely.
+
+Dataset-specific behaviour of the last two stages:
+
+- XES runs with `constraint_profile = "loose"` and
+  `difficulty_signal_enabled = false` (`harness_version =
+  "hachimi_no_difficulty_signal_loose_constraints"`). The compiled bundle is
+  loosened before generation: the reasoning-step budget compiled from the state
+  is kept, `max_sentences` is 3, and the error-path and style lists are empty.
+  The answer is generated step by step within that budget, and a last step that
+  does not commit a final answer is regenerated once.
+- Eedi and ENEM pass the compiled bundle to the generator unchanged, check the
+  output against it (answer space, committed answer, sentence limit, and for
+  Eedi mastery markers), and regenerate under a tightened bundle, up to
+  `--generation_attempts` attempts in total.
+
+## Data boundary
+
+Allowed in the generation path: student history, the current item and its
+metadata, and the third-person intermediate objects derived from them.
+
+Not allowed in the generation path: the gold answer, the real current-item
+answer or correctness label, empirical item statistics, and any future
+observation. No per-item or per-student special-casing, and no post-hoc
+answer rewriting to move a metric.
+
+## Inputs and outputs
+
+Inputs: student history, the persona file used for matching, the current item,
+and item metadata.
+
+Outputs: the item-level student answer plus the intermediate objects and the
+offline evaluation result. The intermediate objects make the method chain
+auditable rather than a single opaque answer. Per-record keys:
+
+- XES `predictions.jsonl`: `student_model`, `implementation_derived_signals`,
+  `problem_requirement_profile`, `student_item_interaction_decision`,
+  `item_response_state`, `constraint_bundle`, `thinking_trace`, the flags
+  `harness_version`, `method_variant`, `response_persona`,
+  `difficulty_signal_enabled`, `constraint_profile`, `ablation_mode`,
+  `behavior_harness_used_in_generation`, and the scored fields `is_correct` and
+  `correctness_label`.
+- Eedi and ENEM `predictions.jsonl`: `student_model`, `internal_signals`,
+  `problem_profile`, `interaction_decision`, `response_state`,
+  `constraint_bundle`, `violation_report`, `retry_count`; `eval_rows.jsonl`
+  holds the scored rows.
+
+## Ablation modes
+
+Every pipeline entry script takes `--ablation_mode`:
+
+- `full`: all stages.
+- `without_hachimi_prior`: no persona matching; the `StudentModel` is built
+  from the visible history only.
+- `without_task_local_state`: the interaction decision and the
+  `ItemResponseState` are replaced by fixed neutral defaults and the bundle is
+  the format-only bundle; the `StudentModel` is unchanged.
+- `without_behavior_harness`: the state is inferred as in `full`, the bundle is
+  the format-only bundle, and the bundle is left out of the generation prompt.
+  Eedi and ENEM still check the output against the format-only bundle.
+
+For Eedi and ENEM the persona prior is used only when `--hachimi_persona_paths`
+is given; the `full`, `without_task_local_state`, and
+`without_behavior_harness` runs pass it.
+
+## Metrics
+
+- XES (`metrics.json`): record-level agreement between simulated and real
+  correctness, per-student accuracy Pearson and Spearman correlations, the
+  Kolmogorov-Smirnov statistic and the Wasserstein-1 distance between the real
+  and simulated per-student accuracy distributions, and per-item accuracy
+  correlations. Simulated correctness comes from the rule-based answer matcher
+  (`--official_correctness_mode rules_only`).
+- Eedi, ENEM, and the baselines (`metrics.json`): `consistency` (agreement of
+  simulated and real correctness), `answer_match`, and the per-student and
+  per-item accuracy Pearson and Spearman correlations. Simulated correctness is
+  the comparison of `predicted_answer` with the answer key.
+
+## Running it
+
+The static entry scripts live under `static/` and are run from the repository
+root. Each takes an OpenAI-compatible endpoint via `--llm_base_url`,
+`--llm_model`, and `--llm_api_key`. The script defaults are the settings of the
+reported runs (temperature 0.2, JSON response format).
+
+- `static/xes/` — XES3G5M, 60 students x 96 items
+  (`configs/common_test_60x96_20260507.json`, 30 history items per student).
+  The cohort is prepared offline and then simulated:
+
+  ```
+  python static/xes/run_irt_support_filter.py
+  python static/xes/export_irt_calibration_inputs.py --eligible_question_path <irt_support run>/eligible_questions.json
+  python static/xes/split_irt_calibration_by_module.py --input_dir <irt_calibration_inputs run>
+  python static/xes/fit_rasch_module.py --module_dir <irt_calibration_inputs run>/modules/<module>   # once per module
+  python static/xes/run_student_conditioned_benchmark.py \
+    --eligible_question_path <irt_support run>/eligible_questions.json \
+    --persona_path <personas.jsonl> --ablation_mode full \
+    --llm_base_url ... --llm_model ... --llm_api_key ...
+  ```
+
+  The support filter selects the eligible item pool (966 items with the default
+  thresholds), and the Rasch module fits under
+  `static/xes/outputs/rasch_module_fits` give the easy/medium/hard bands used in
+  the history summaries. The item difficulty signal is not passed to the
+  generator. Add `--prepare_only` to build the cohort without model calls
+  (`--ablation_mode without_hachimi_prior` needs no model for this step).
+- `static/eedi-static/` — Eedi, 480 students x 107 items
+  (`configs/eedi_static_image_age_balanced_480x107_20260526.json`).
+- `static/enem/` — ENEM 2024 natural sciences, 7,200 students x 24 items
+  (`configs/enem_cn_static_english_text_plus_image_20260529.json`, English item
+  text plus the item image).
+- `static/baselines/` — Direct Role-Play, Prompt-Constrained, and
+  Profile-Conditioned baselines for the static setting. They read the cohort
+  files written by the pipelines above.
+
+See the `README.md` in `static/eedi-static/`, `static/enem/`, and
+`static/baselines/` for the commands of those settings.
+
+## When this method transfers
+
+The static method fits tasks where samples are largely independent, each
+prediction targets one local student behaviour, the focus is "how would this
+student handle this task", and there is no long chain of state updates across
+many turns.

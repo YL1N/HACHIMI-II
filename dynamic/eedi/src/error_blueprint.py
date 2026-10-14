@@ -5,13 +5,13 @@ from dataclasses import asdict, dataclass
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
-from .population_calibration import (
-    PopulationCalibrationSummary,
-    population_calibration_summary_to_dict,
+from .persona_prior import (
+    PersonaPriorSummary,
+    persona_prior_summary_to_dict,
 )
 from .prompts import ERROR_BLUEPRINT_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
-from .student_turn_state import InteractionState
+from .student_turn_state import TaskLocalLearnerState
 from .transition import StateTransitionPrediction
 from .tutor_turn_profile import TutorTurnProfile
 
@@ -51,10 +51,10 @@ def build_error_blueprint(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     transition_prediction: StateTransitionPrediction,
     llm_client: OpenAICompatClient,
-    population_calibration_summary: PopulationCalibrationSummary | None = None,
+    persona_prior_summary: PersonaPriorSummary | None = None,
 ) -> ErrorBlueprint:
     payload = {
         "student_context_profile": asdict(student_context_profile),
@@ -62,8 +62,8 @@ def build_error_blueprint(
         "tutor_turn_profile": asdict(tutor_profile),
         "interaction_state": asdict(interaction_state),
         "state_transition_prediction": asdict(transition_prediction),
-        "population_calibration_summary": population_calibration_summary_to_dict(
-            population_calibration_summary
+        "persona_prior_summary": persona_prior_summary_to_dict(
+            persona_prior_summary
         ),
         "theory_decision_cues": {
             "tutor_is_eliciting_local_math_content": _tutor_is_eliciting_local_math_content(
@@ -81,9 +81,6 @@ def build_error_blueprint(
                 in {"active_misconception", "destabilizing_misconception"}
                 or transition_prediction.predicted_misconception_trajectory_shift
                 in {"hold_trajectory", "perturb_trajectory"}
-            ),
-            "important_interpretation_note": (
-                "Tentative wording does not by itself cancel a concrete mathematical error."
             ),
         },
         "required_schema": {

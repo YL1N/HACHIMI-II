@@ -1,7 +1,7 @@
 {
   "setting_name": "eedi_static_image_age_balanced_480_students_107_items_20260526",
   "description": "Image-only EEDI-static age-balanced common-test set: age 11 and 12, 240 students each, four ability bands with 60 students per age-band, all selected students answered the same 107 questions.",
-  "source_dataset_root": "D:\\Study\\sii\\MathStudent\\static\\eedi-static",
+  "source_dataset_root": "static\\eedi-static",
   "source_train_data": "raw_data/data/train_data/train_task_3_4.csv",
   "source_images": "raw_data/data/images",
   "source_ocr": "raw_data/data/eedi_ocr.jsonl",

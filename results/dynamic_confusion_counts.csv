@@ -1,0 +1,91 @@
+dataset,method,real_label,sim_label,count
+Eedi QATD2k,Direct RP,Correct,Correct,4883
+Eedi QATD2k,Direct RP,Correct,Incorrect,607
+Eedi QATD2k,Direct RP,Correct,NA,50
+Eedi QATD2k,Direct RP,Incorrect,Correct,2985
+Eedi QATD2k,Direct RP,Incorrect,Incorrect,911
+Eedi QATD2k,Direct RP,Incorrect,NA,88
+Eedi QATD2k,Direct RP,NA,Correct,559
+Eedi QATD2k,Direct RP,NA,Incorrect,181
+Eedi QATD2k,Direct RP,NA,NA,6992
+Eedi QATD2k,Prompt-C,Correct,Correct,4915
+Eedi QATD2k,Prompt-C,Correct,Incorrect,549
+Eedi QATD2k,Prompt-C,Correct,NA,37
+Eedi QATD2k,Prompt-C,Incorrect,Correct,3136
+Eedi QATD2k,Prompt-C,Incorrect,Incorrect,850
+Eedi QATD2k,Prompt-C,Incorrect,NA,50
+Eedi QATD2k,Prompt-C,NA,Correct,595
+Eedi QATD2k,Prompt-C,NA,Incorrect,176
+Eedi QATD2k,Prompt-C,NA,NA,6948
+Eedi QATD2k,Profile-C,Correct,Correct,4814
+Eedi QATD2k,Profile-C,Correct,Incorrect,692
+Eedi QATD2k,Profile-C,Correct,NA,58
+Eedi QATD2k,Profile-C,Incorrect,Correct,2878
+Eedi QATD2k,Profile-C,Incorrect,Incorrect,985
+Eedi QATD2k,Profile-C,Incorrect,NA,96
+Eedi QATD2k,Profile-C,NA,Correct,534
+Eedi QATD2k,Profile-C,NA,Incorrect,180
+Eedi QATD2k,Profile-C,NA,NA,7019
+Eedi QATD2k,Agent-Mem,Correct,Correct,4829
+Eedi QATD2k,Agent-Mem,Correct,Incorrect,652
+Eedi QATD2k,Agent-Mem,Correct,NA,64
+Eedi QATD2k,Agent-Mem,Incorrect,Correct,2885
+Eedi QATD2k,Agent-Mem,Incorrect,Incorrect,986
+Eedi QATD2k,Agent-Mem,Incorrect,NA,98
+Eedi QATD2k,Agent-Mem,NA,Correct,541
+Eedi QATD2k,Agent-Mem,NA,Incorrect,176
+Eedi QATD2k,Agent-Mem,NA,NA,7025
+Eedi QATD2k,HACHIMI-II,Correct,Correct,2961
+Eedi QATD2k,HACHIMI-II,Correct,Incorrect,2787
+Eedi QATD2k,HACHIMI-II,Correct,NA,149
+Eedi QATD2k,HACHIMI-II,Incorrect,Correct,725
+Eedi QATD2k,HACHIMI-II,Incorrect,Incorrect,2840
+Eedi QATD2k,HACHIMI-II,Incorrect,NA,187
+Eedi QATD2k,HACHIMI-II,NA,Correct,0
+Eedi QATD2k,HACHIMI-II,NA,Incorrect,0
+Eedi QATD2k,HACHIMI-II,NA,NA,7607
+Khan/CoMTA,Direct RP,Correct,Correct,395
+Khan/CoMTA,Direct RP,Correct,Incorrect,38
+Khan/CoMTA,Direct RP,Correct,NA,3
+Khan/CoMTA,Direct RP,Incorrect,Correct,296
+Khan/CoMTA,Direct RP,Incorrect,Incorrect,42
+Khan/CoMTA,Direct RP,Incorrect,NA,5
+Khan/CoMTA,Direct RP,NA,Correct,34
+Khan/CoMTA,Direct RP,NA,Incorrect,5
+Khan/CoMTA,Direct RP,NA,NA,99
+Khan/CoMTA,Prompt-C,Correct,Correct,403
+Khan/CoMTA,Prompt-C,Correct,Incorrect,34
+Khan/CoMTA,Prompt-C,Correct,NA,2
+Khan/CoMTA,Prompt-C,Incorrect,Correct,301
+Khan/CoMTA,Prompt-C,Incorrect,Incorrect,40
+Khan/CoMTA,Prompt-C,Incorrect,NA,1
+Khan/CoMTA,Prompt-C,NA,Correct,35
+Khan/CoMTA,Prompt-C,NA,Incorrect,4
+Khan/CoMTA,Prompt-C,NA,NA,97
+Khan/CoMTA,Profile-C,Correct,Correct,392
+Khan/CoMTA,Profile-C,Correct,Incorrect,42
+Khan/CoMTA,Profile-C,Correct,NA,3
+Khan/CoMTA,Profile-C,Incorrect,Correct,284
+Khan/CoMTA,Profile-C,Incorrect,Incorrect,55
+Khan/CoMTA,Profile-C,Incorrect,NA,5
+Khan/CoMTA,Profile-C,NA,Correct,35
+Khan/CoMTA,Profile-C,NA,Incorrect,4
+Khan/CoMTA,Profile-C,NA,NA,97
+Khan/CoMTA,Agent-Mem,Correct,Correct,399
+Khan/CoMTA,Agent-Mem,Correct,Incorrect,35
+Khan/CoMTA,Agent-Mem,Correct,NA,2
+Khan/CoMTA,Agent-Mem,Incorrect,Correct,292
+Khan/CoMTA,Agent-Mem,Incorrect,Incorrect,48
+Khan/CoMTA,Agent-Mem,Incorrect,NA,4
+Khan/CoMTA,Agent-Mem,NA,Correct,34
+Khan/CoMTA,Agent-Mem,NA,Incorrect,6
+Khan/CoMTA,Agent-Mem,NA,NA,97
+Khan/CoMTA,HACHIMI-II,Correct,Correct,154
+Khan/CoMTA,HACHIMI-II,Correct,Incorrect,246
+Khan/CoMTA,HACHIMI-II,Correct,NA,1
+Khan/CoMTA,HACHIMI-II,Incorrect,Correct,89
+Khan/CoMTA,HACHIMI-II,Incorrect,Incorrect,219
+Khan/CoMTA,HACHIMI-II,Incorrect,NA,0
+Khan/CoMTA,HACHIMI-II,NA,Correct,13
+Khan/CoMTA,HACHIMI-II,NA,Incorrect,30
+Khan/CoMTA,HACHIMI-II,NA,NA,165

@@ -5,9 +5,9 @@ from dataclasses import asdict, dataclass, replace
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
-from .population_calibration import (
-    PopulationCalibrationSummary,
-    population_calibration_summary_to_dict,
+from .persona_prior import (
+    PersonaPriorSummary,
+    persona_prior_summary_to_dict,
 )
 from .prompts import STATE_TRANSITION_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
@@ -21,7 +21,7 @@ from .student_turn_state import (
     MATURITY_CAPS,
     METACOG_STATES,
     MISCONCEPTION_STATUSES,
-    InteractionState,
+    TaskLocalLearnerState,
 )
 from .tutor_turn_profile import TutorTurnProfile
 
@@ -52,17 +52,17 @@ def predict_state_transition(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     llm_client: OpenAICompatClient,
-    population_calibration_summary: PopulationCalibrationSummary | None = None,
+    persona_prior_summary: PersonaPriorSummary | None = None,
 ) -> StateTransitionPrediction:
     payload = {
         "student_context_profile": asdict(student_context_profile),
         "dialogue_context": asdict(context),
         "tutor_turn_profile": asdict(tutor_profile),
         "interaction_state": asdict(interaction_state),
-        "population_calibration_summary": population_calibration_summary_to_dict(
-            population_calibration_summary
+        "persona_prior_summary": persona_prior_summary_to_dict(
+            persona_prior_summary
         ),
         "required_schema": {
             "predicted_next_competence_position": list(COMPETENCE_POSITIONS),
@@ -202,7 +202,7 @@ def _coerce_str_list(value: object, field_name: str) -> list[str]:
 def _apply_transition_policies(
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     prediction: StateTransitionPrediction,
 ) -> StateTransitionPrediction:
     prediction = _apply_misconception_persistence_policy(
@@ -219,7 +219,7 @@ def _apply_transition_policies(
 
 def _apply_misconception_persistence_policy(
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     prediction: StateTransitionPrediction,
 ) -> StateTransitionPrediction:
     if interaction_state.misconception_status not in {
@@ -293,11 +293,9 @@ def _apply_dialogue_management_policy(
             "Active"
             if not context.last_student_turn.strip()
             and prediction.predicted_next_engagement_form == "Passive"
-            else (
-                "Active"
-                if prediction.predicted_next_engagement_form in {"Constructive", "Interactive"}
-                else prediction.predicted_next_engagement_form
-            )
+            else "Active"
+            if prediction.predicted_next_engagement_form in {"Constructive", "Interactive"}
+            else prediction.predicted_next_engagement_form
         ),
         predicted_next_attempt_readiness="not_ready",
         predicted_next_response_commitment_state=(

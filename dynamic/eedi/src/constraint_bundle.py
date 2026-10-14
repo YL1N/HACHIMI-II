@@ -7,7 +7,7 @@ from .transition import StateTransitionPrediction
 
 
 @dataclass(frozen=True)
-class ConstraintBundle:
+class BehaviorHarness:
     max_sentences: int
     max_step_budget: int
     allow_direct_answer: bool
@@ -27,11 +27,11 @@ class ConstraintBundle:
     style_constraints: list[str]
 
 
-def compile_constraints(
+def compile_behavior_harness(
     prediction: StateTransitionPrediction,
     error_blueprint: ErrorBlueprint,
     constraint_profile: str = "default",
-) -> ConstraintBundle:
+) -> BehaviorHarness:
     supported_profiles = {
         "default",
         "loose",
@@ -319,7 +319,7 @@ def compile_constraints(
             "Use in-the-moment student wording.",
         ]
 
-    return ConstraintBundle(
+    return BehaviorHarness(
         max_sentences=max_sentences,
         max_step_budget=max_step_budget,
         allow_direct_answer=allow_direct_answer,
@@ -340,7 +340,7 @@ def compile_constraints(
     )
 
 
-def constraint_bundle_to_dict(bundle: ConstraintBundle) -> dict[str, object]:
+def constraint_bundle_to_dict(bundle: BehaviorHarness) -> dict[str, object]:
     return asdict(bundle)
 
 

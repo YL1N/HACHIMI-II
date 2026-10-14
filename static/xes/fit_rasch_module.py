@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import csv
@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
 
 from src.rasch_fit import compute_raw_score_counters, filter_extreme_scores, fit_rasch_jml
 

@@ -33,12 +33,12 @@ from .irt_support import _band_students
 from .llm_client import OpenAICompatClient
 from .problem_profile import ProblemRequirementProfile, build_problem_requirement_profile
 from .response_state import (
-    ConstraintBundle,
-    ItemResponseState,
+    BehaviorHarness,
+    TaskLocalLearnerState,
     build_default_item_response_state_for_ablation,
     build_format_only_constraints,
-    compile_constraints,
-    resolve_item_response_state,
+    compile_behavior_harness,
+    infer_task_local_state,
 )
 from .runtime_paths import XES_OUTPUTS_DIR
 from .student_item_interaction import (
@@ -124,9 +124,9 @@ class PersonaMatch:
 
 
 def loosen_constraint_bundle(
-    constraints: ConstraintBundle,
-) -> ConstraintBundle:
-    return ConstraintBundle(
+    constraints: BehaviorHarness,
+) -> BehaviorHarness:
+    return BehaviorHarness(
         must_commit_answer=True,
         allow_complete_explanation=True,
         max_sentences=3,
@@ -1382,9 +1382,6 @@ def build_problem_profiles_for_questions(
             options=question.options,
             question_type=question.question_type,
             llm_client=llm_client,
-            enable_difficulty_analysis=False,
-            real_difficulty_band=None,
-            difficulty_anchor_context=None,
         )
         profiles[question.question_id] = profile
     return profiles
@@ -1423,19 +1420,18 @@ def run_single_prediction(
             student_model=student_model,
             profile=problem_profile,
         )
-        item_state = resolve_item_response_state(
+        item_state = infer_task_local_state(
             student_model=student_model,
             internal_signals=internal_signals,
             profile=problem_profile,
             question_text=question.question_text,
             llm_client=llm_client,
-            use_difficulty_aware_prompt=False,
             interaction_decision=interaction_decision,
         )
         constraints = (
             build_format_only_constraints(max_thinking_steps=max_thinking_steps)
             if ablation_mode == "without_behavior_harness"
-            else loosen_constraint_bundle(compile_constraints(item_state))
+            else loosen_constraint_bundle(compile_behavior_harness(item_state))
         )
     answer_output = generate_student_answer(
         student_model=student_model,

@@ -109,7 +109,7 @@ class StudentItemInteractionDecision:
 
 
 @dataclass(frozen=True)
-class ItemResponseState:
+class TaskLocalLearnerState:
     prerequisite_familiarity: str
     response_state: str
     reachable_level: str
@@ -120,7 +120,7 @@ class ItemResponseState:
 
 
 @dataclass(frozen=True)
-class ConstraintBundle:
+class BehaviorHarness:
     must_commit_answer: bool
     allow_complete_explanation: bool
     max_sentences: int
@@ -149,8 +149,8 @@ class Prediction:
     internal_signals: StudentInternalSignals
     problem_profile: ProblemRequirementProfile
     interaction_decision: StudentItemInteractionDecision
-    response_state: ItemResponseState
-    constraint_bundle: ConstraintBundle
+    response_state: TaskLocalLearnerState
+    constraint_bundle: BehaviorHarness
     violation_report: ViolationReport
     retry_count: int
 
@@ -789,13 +789,13 @@ Return JSON with:
     return _chat_image_and_parse_with_retry(llm, prompt, question.image_path, parse, "StudentItemInteractionDecision")
 
 
-def resolve_item_response_state(
+def infer_task_local_state(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals,
     profile: ProblemRequirementProfile,
     interaction_decision: StudentItemInteractionDecision,
     llm: OpenAICompatClient | None,
-) -> ItemResponseState:
+) -> TaskLocalLearnerState:
     if llm is None:
         if interaction_decision.predicted_reachability == "within_reach":
             familiarity = "familiar"
@@ -806,7 +806,7 @@ def resolve_item_response_state(
         else:
             familiarity = "weak"
             reachable = "mostly_guessing"
-        return ItemResponseState(
+        return TaskLocalLearnerState(
             prerequisite_familiarity=familiarity,
             response_state=interaction_decision.predicted_correctness_band,
             reachable_level=reachable,
@@ -849,8 +849,8 @@ Return JSON with:
 - response_style_guidance: list[str]. Only expression-style constraints, such as brevity, hesitation, directness, or example-based wording. Valid examples: "brief and hesitant", "direct but uncertain", "short example-driven phrasing". Invalid examples: "explain the rule", "show the correct method", "guide the student to notice the pattern".
 """
 
-    def parse(parsed: dict[str, Any]) -> ItemResponseState:
-        return ItemResponseState(
+    def parse(parsed: dict[str, Any]) -> TaskLocalLearnerState:
+        return TaskLocalLearnerState(
             prerequisite_familiarity=_non_empty(parsed.get("prerequisite_familiarity"), "prerequisite_familiarity"),
             response_state=_non_empty(parsed.get("response_state"), "response_state"),
             reachable_level=_non_empty(parsed.get("reachable_level"), "reachable_level"),
@@ -865,10 +865,10 @@ Return JSON with:
     return _chat_and_parse_with_retry(llm, prompt, parse, "ItemResponseState")
 
 
-def compile_constraints(item_state: ItemResponseState, max_thinking_steps: int = 4) -> ConstraintBundle:
+def compile_behavior_harness(item_state: TaskLocalLearnerState, max_thinking_steps: int = 4) -> BehaviorHarness:
     allow_complete = item_state.explanation_depth_cap == "complete"
     max_sentences = 1 if item_state.explanation_depth_cap == "none" else 8
-    return ConstraintBundle(
+    return BehaviorHarness(
         must_commit_answer=True,
         allow_complete_explanation=allow_complete,
         max_sentences=max_sentences,
@@ -881,10 +881,54 @@ def compile_constraints(item_state: ItemResponseState, max_thinking_steps: int =
     )
 
 
+def build_default_interaction_decision_for_ablation() -> StudentItemInteractionDecision:
+    return StudentItemInteractionDecision(
+        predicted_reachability="partial_reach",
+        predicted_correctness_band="uncertain",
+        likely_outcome="generic one-option attempt without task-local learner-state inference",
+        likely_error_family="generic_uncertainty",
+        confidence_cap="medium",
+        explanation_cap="brief",
+        decision_rationale=[
+            "ablation=without_task_local_state",
+            "neutral task-format decision; no current-item learner state inferred",
+        ],
+    )
+
+
+def build_default_item_response_state_for_ablation() -> TaskLocalLearnerState:
+    return TaskLocalLearnerState(
+        prerequisite_familiarity="not_inferred",
+        response_state="uncertain",
+        reachable_level="task_format_generic",
+        error_path=["generic_uncertainty"],
+        commitment_tendency="commit_to_one_option",
+        explanation_depth_cap="brief",
+        response_style_guidance=[
+            "brief student-style option choice",
+            "no task-local learner state was inferred",
+        ],
+    )
+
+
+def build_format_only_constraints(answer_space: list[str] | None = None) -> BehaviorHarness:
+    return BehaviorHarness(
+        must_commit_answer=True,
+        allow_complete_explanation=True,
+        max_sentences=8,
+        max_thinking_steps=4,
+        forbid_full_mastery=False,
+        preferred_error_path=[],
+        style_constraints=[],
+        allowed_commitment="any",
+        output_answer_space=list(answer_space or ["1", "2", "3", "4"]),
+    )
+
+
 def check_violation(
     predicted_answer: str,
     student_response: str,
-    constraints: ConstraintBundle,
+    constraints: BehaviorHarness,
 ) -> ViolationReport:
     reasons: list[str] = []
     if predicted_answer not in constraints.output_answer_space:
@@ -904,7 +948,7 @@ def check_violation(
     return ViolationReport(has_violation=True, reasons=reasons, severity=severity)
 
 
-def tighten_constraints(constraints: ConstraintBundle) -> ConstraintBundle:
+def tighten_behavior_harness(constraints: BehaviorHarness) -> BehaviorHarness:
     return replace(
         constraints,
         allow_complete_explanation=False,
@@ -920,13 +964,24 @@ def _generation_prompt(
     internal_signals: StudentInternalSignals,
     problem_profile: ProblemRequirementProfile,
     interaction_decision: StudentItemInteractionDecision,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     retry_instruction: str = "",
+    use_behavior_harness: bool = True,
 ) -> str:
+    allowed_harness_line = "- ConstraintBundle\n" if use_behavior_harness else ""
+    harness_block = (
+        f"\nConstraintBundle:\n{_compact_json(asdict(constraints))}\n"
+        if use_behavior_harness
+        else ""
+    )
+    response_instruction = (
+        "short student-style response within ConstraintBundle.max_sentences, not a full solution proof"
+        if use_behavior_harness
+        else "short student-style response"
+    )
     return f"""
 Generate the student's current answer for this EEDI-static 4-option diagnostic item.
-Respect ConstraintBundle.max_sentences.
 Keep the answer brief and student-like.
 Do not write a full solution proof.
 Use the attached image as the only current item content.
@@ -938,7 +993,7 @@ Allowed information:
 - ProblemRequirementProfile from current item image and subject labels
 - StudentItemInteractionDecision
 - ItemResponseState
-- ConstraintBundle
+{allowed_harness_line.rstrip()}
 
 Forbidden information:
 - true current AnswerValue
@@ -961,15 +1016,13 @@ StudentItemInteractionDecision:
 
 ItemResponseState:
 {_compact_json(asdict(item_state))}
-
-ConstraintBundle:
-{_compact_json(asdict(constraints))}
+{harness_block}
 
 {retry_instruction}
 
 Return JSON with:
 - predicted_answer: one of "1","2","3","4"
-- student_response: short student-style response within ConstraintBundle.max_sentences, not a full solution proof
+- student_response: {response_instruction}
 """
 
 
@@ -979,10 +1032,11 @@ def _call_generator(
     internal_signals: StudentInternalSignals,
     problem_profile: ProblemRequirementProfile,
     interaction_decision: StudentItemInteractionDecision,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     llm: OpenAICompatClient | None,
     retry_instruction: str = "",
+    use_behavior_harness: bool = True,
 ) -> tuple[str, str]:
     if llm is None:
         choices = ["1", "2", "3", "4"]
@@ -1003,6 +1057,7 @@ def _call_generator(
         item_state=item_state,
         constraints=constraints,
         retry_instruction=retry_instruction,
+        use_behavior_harness=use_behavior_harness,
     )
     parsed = llm.chat_json_with_image(SYSTEM_JSON, prompt, question.image_path)
     try:
@@ -1032,10 +1087,11 @@ def generate_prediction(
     internal_signals: StudentInternalSignals,
     problem_profile: ProblemRequirementProfile,
     interaction_decision: StudentItemInteractionDecision,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     llm: OpenAICompatClient | None,
     max_generation_attempts: int = 4,
+    use_behavior_harness: bool = True,
 ) -> Prediction:
     if max_generation_attempts < 1:
         raise ValueError("max_generation_attempts must be >= 1")
@@ -1056,6 +1112,7 @@ def generate_prediction(
             constraints=final_constraints,
             llm=llm,
             retry_instruction=retry_instruction,
+            use_behavior_harness=use_behavior_harness,
         )
         violation = check_violation(predicted_answer, student_response, final_constraints)
         if not violation.has_violation:
@@ -1075,7 +1132,7 @@ def generate_prediction(
             )
 
         violation_history.append(",".join(violation.reasons))
-        final_constraints = tighten_constraints(constraints)
+        final_constraints = tighten_behavior_harness(constraints)
         retry_instruction = (
             "Previous output violated constraints: "
             f"{', '.join(violation.reasons)}. "

@@ -7,7 +7,7 @@ from typing import Any
 
 from .llm_client import OpenAICompatClient
 from .problem_profile import ProblemRequirementProfile
-from .prompts import ITEM_RESPONSE_STATE_PROMPT, ITEM_RESPONSE_STATE_WITH_DIFFICULTY_PROMPT, VIOLATION_REVIEW_PROMPT
+from .prompts import TASK_LOCAL_STATE_PROMPT, VIOLATION_REVIEW_PROMPT
 from .student_model import StudentInternalSignals, StudentModel
 from .student_item_interaction import StudentItemInteractionDecision
 
@@ -22,7 +22,7 @@ ITEM_RESPONSE_STATE_SCHEMA_RETRY_NOTE = (
 
 
 @dataclass(frozen=True)
-class ItemResponseState:
+class TaskLocalLearnerState:
     prerequisite_familiarity: str
     response_state: str
     reachable_level: str
@@ -33,7 +33,7 @@ class ItemResponseState:
 
 
 @dataclass(frozen=True)
-class ConstraintBundle:
+class BehaviorHarness:
     must_commit_answer: bool
     allow_complete_explanation: bool
     max_sentences: int
@@ -93,11 +93,11 @@ def _validate_bool(value: Any, field_name: str) -> bool:
     raise ValueError(f"invalid {field_name}: {value!r}, expected bool")
 
 
-def _build_item_response_state_from_parsed(parsed: dict[str, Any]) -> ItemResponseState:
+def _build_item_response_state_from_parsed(parsed: dict[str, Any]) -> TaskLocalLearnerState:
     reachable_level = str(parsed.get("reachable_level", "")).strip()
     if not reachable_level:
         raise ValueError("reachable_level is empty in llm item response state output")
-    return ItemResponseState(
+    return TaskLocalLearnerState(
         prerequisite_familiarity=_validate_enum(
             parsed.get("prerequisite_familiarity"),
             {"familiar", "partially_familiar", "mostly_unfamiliar"},
@@ -141,22 +141,15 @@ def _internal_signals_payload(
     raise TypeError(f"unsupported internal_signals type: {type(internal_signals).__name__}")
 
 
-def _resolve_item_response_state_with_llm(
+def _infer_task_local_state_with_llm(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals | dict[str, str] | None,
     profile: ProblemRequirementProfile,
     question_text: str,
     llm_client: OpenAICompatClient,
-    use_difficulty_aware_prompt: bool = False,
     interaction_decision: StudentItemInteractionDecision | None = None,
-) -> ItemResponseState:
-    # Choose prompt based on whether difficulty information is available
-    system_prompt = ITEM_RESPONSE_STATE_PROMPT
-    if use_difficulty_aware_prompt and (
-        profile.perceived_difficulty_for_target_grade is not None
-        or profile.real_difficulty_band is not None
-    ):
-        system_prompt = ITEM_RESPONSE_STATE_WITH_DIFFICULTY_PROMPT
+) -> TaskLocalLearnerState:
+    system_prompt = TASK_LOCAL_STATE_PROMPT
 
     user_payload = {
         "student_model": {
@@ -203,23 +196,6 @@ def _resolve_item_response_state_with_llm(
     if signals_payload is not None:
         user_payload["implementation_derived_signals"] = signals_payload
 
-    # Add difficulty information if available
-    if profile.perceived_difficulty_for_target_grade is not None:
-        user_payload["problem_requirement_profile"]["perceived_difficulty_for_target_grade"] = (
-            profile.perceived_difficulty_for_target_grade
-        )
-        user_payload["problem_requirement_profile"]["perceived_difficulty_justification"] = (
-            profile.perceived_difficulty_justification or ""
-        )
-    elif profile.real_difficulty_band is not None:
-        # For H2: use real difficulty band as perceived difficulty
-        user_payload["problem_requirement_profile"]["perceived_difficulty_for_target_grade"] = (
-            profile.real_difficulty_band
-        )
-        user_payload["problem_requirement_profile"]["perceived_difficulty_justification"] = (
-            f"Real difficulty band from actual student performance: {profile.real_difficulty_band}"
-        )
-
     if interaction_decision is not None:
         user_payload["student_item_interaction_decision"] = asdict(interaction_decision)
 
@@ -249,78 +225,29 @@ def _resolve_item_response_state_with_llm(
             ) from second_exc
 
 
-def resolve_item_response_state(
+def infer_task_local_state(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals | dict[str, str] | None,
     profile: ProblemRequirementProfile,
     question_text: str,
     llm_client: OpenAICompatClient | None = None,
-    use_difficulty_aware_prompt: bool = False,
     interaction_decision: StudentItemInteractionDecision | None = None,
-) -> ItemResponseState:
+) -> TaskLocalLearnerState:
     if llm_client is None:
         raise ValueError(
-            "resolve_item_response_state requires llm_client; semantic inference cannot use heuristic fallback"
+            "infer_task_local_state requires llm_client; semantic inference cannot use heuristic fallback"
         )
-    return _resolve_item_response_state_with_llm(
+    return _infer_task_local_state_with_llm(
         student_model=student_model,
         internal_signals=internal_signals,
         profile=profile,
         question_text=question_text,
         llm_client=llm_client,
-        use_difficulty_aware_prompt=use_difficulty_aware_prompt,
         interaction_decision=interaction_decision,
     )
 
 
-def build_forced_item_response_state(response_state: str) -> ItemResponseState:
-    if response_state == "mastered":
-        return ItemResponseState(
-            prerequisite_familiarity="familiar",
-            response_state="mastered",
-            reachable_level="The student can likely solve the item relatively stably.",
-            error_path=[],
-            commitment_tendency="high",
-            explanation_depth_cap="full_reason",
-            response_style_guidance=["stay concise", "answer directly"],
-        )
-    if response_state == "partial":
-        return ItemResponseState(
-            prerequisite_familiarity="partially_familiar",
-            response_state="partial",
-            reachable_level="The student can get part of the way but is not stable to the end.",
-            error_path=["partial_procedure_breakdown", "incomplete_integration"],
-            commitment_tendency="medium",
-            explanation_depth_cap="limited_reason",
-            response_style_guidance=["keep the explanation limited", "allow uncertainty"],
-        )
-    if response_state == "guessable":
-        return ItemResponseState(
-            prerequisite_familiarity="partially_familiar",
-            response_state="guessable",
-            reachable_level="The student may guess from surface cues but does not truly master the item.",
-            error_path=["surface_cue_guess", "partial_elimination_without_stable_reasoning"],
-            commitment_tendency="low",
-            explanation_depth_cap="short_reason",
-            response_style_guidance=["do not sound fully competent", "keep reasoning shallow"],
-        )
-    if response_state == "unreachable":
-        return ItemResponseState(
-            prerequisite_familiarity="mostly_unfamiliar",
-            response_state="unreachable",
-            reachable_level="The item is beyond the student's workable boundary, so only a forced guess is plausible.",
-            error_path=["blind_guess", "off_target_attempt"],
-            commitment_tendency="low",
-            explanation_depth_cap="answer_only",
-            response_style_guidance=["do not sound like full mastery", "keep to a bare answer"],
-        )
-    raise ValueError(
-        "response_state must be one of mastered/partial/guessable/unreachable, "
-        f"got {response_state!r}"
-    )
-
-
-def compile_constraints(item_state: ItemResponseState) -> ConstraintBundle:
+def compile_behavior_harness(item_state: TaskLocalLearnerState) -> BehaviorHarness:
     if item_state.response_state == "mastered":
         allow_complete_explanation = item_state.explanation_depth_cap == "full_reason"
         max_sentences = 3 if allow_complete_explanation else 2
@@ -337,7 +264,7 @@ def compile_constraints(item_state: ItemResponseState) -> ConstraintBundle:
         max_thinking_steps = 1
         forbid_full_mastery = True
 
-    return ConstraintBundle(
+    return BehaviorHarness(
         must_commit_answer=True,
         allow_complete_explanation=allow_complete_explanation,
         max_sentences=max_sentences,
@@ -349,8 +276,8 @@ def compile_constraints(item_state: ItemResponseState) -> ConstraintBundle:
     )
 
 
-def build_default_item_response_state_for_ablation() -> ItemResponseState:
-    return ItemResponseState(
+def build_default_item_response_state_for_ablation() -> TaskLocalLearnerState:
+    return TaskLocalLearnerState(
         prerequisite_familiarity="partially_familiar",
         response_state="partial",
         reachable_level="generic task-format boundary; no current-item learner state inferred",
@@ -364,8 +291,8 @@ def build_default_item_response_state_for_ablation() -> ItemResponseState:
     )
 
 
-def build_format_only_constraints(max_thinking_steps: int = 4) -> ConstraintBundle:
-    return ConstraintBundle(
+def build_format_only_constraints(max_thinking_steps: int = 4) -> BehaviorHarness:
+    return BehaviorHarness(
         must_commit_answer=True,
         allow_complete_explanation=True,
         max_sentences=3,
@@ -385,8 +312,8 @@ def _count_sentences(text: str) -> int:
 def check_hard_violation_rules(
     predicted_answer: str,
     student_response: str,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
 ) -> ViolationReport:
     reasons: list[str] = []
     answer_text = (predicted_answer or "").strip()
@@ -428,7 +355,7 @@ def check_hard_violation_rules(
     return ViolationReport(has_violation=True, reasons=reasons, severity=severity)
 
 
-def _is_boundary_sample(item_state: ItemResponseState, hard_report: ViolationReport) -> bool:
+def _is_boundary_sample(item_state: TaskLocalLearnerState, hard_report: ViolationReport) -> bool:
     # LLM boundary review is only for ambiguous hard-rule violations.
     if not hard_report.has_violation:
         return False
@@ -442,8 +369,8 @@ def _is_boundary_sample(item_state: ItemResponseState, hard_report: ViolationRep
 def review_violation_with_llm(
     predicted_answer: str,
     student_response: str,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     llm_client: OpenAICompatClient,
 ) -> ViolationReport:
     user_payload = {
@@ -527,8 +454,8 @@ def _merge_violation_reports(
 def check_violation(
     predicted_answer: str,
     student_response: str,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     llm_client: OpenAICompatClient | None = None,
     enable_llm_boundary_review: bool = True,
 ) -> ViolationReport:
@@ -554,7 +481,7 @@ def check_violation(
     return _merge_violation_reports(hard_report=hard_report, llm_report=llm_report)
 
 
-def tighten_constraints(item_state: ItemResponseState, constraints: ConstraintBundle) -> ConstraintBundle:
+def tighten_behavior_harness(item_state: TaskLocalLearnerState, constraints: BehaviorHarness) -> BehaviorHarness:
     style_constraints = list(constraints.style_constraints)
     if "strict_retry_mode" not in style_constraints:
         style_constraints.append("strict_retry_mode")
@@ -564,7 +491,7 @@ def tighten_constraints(item_state: ItemResponseState, constraints: ConstraintBu
         allowed_commitment = (
             "medium" if constraints.allowed_commitment == "high" else constraints.allowed_commitment
         )
-        return ConstraintBundle(
+        return BehaviorHarness(
             must_commit_answer=True,
             allow_complete_explanation=constraints.allow_complete_explanation,
             max_sentences=max(1, constraints.max_sentences),
@@ -579,7 +506,7 @@ def tighten_constraints(item_state: ItemResponseState, constraints: ConstraintBu
         allowed_commitment = (
             "low" if constraints.allowed_commitment == "high" else constraints.allowed_commitment
         )
-        return ConstraintBundle(
+        return BehaviorHarness(
             must_commit_answer=True,
             allow_complete_explanation=False,
             max_sentences=max(1, constraints.max_sentences - 1),
@@ -591,7 +518,7 @@ def tighten_constraints(item_state: ItemResponseState, constraints: ConstraintBu
         )
 
     # guessable / unreachable remain strict.
-    return ConstraintBundle(
+    return BehaviorHarness(
         must_commit_answer=True,
         allow_complete_explanation=False,
         max_sentences=1,

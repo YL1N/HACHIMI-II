@@ -144,7 +144,8 @@ def _resolve_math_prior(persona: PersonaRecord) -> str:
     weak_has_math = MATH_SUBJECT in persona.weak_subjects
     if strong_has_math and weak_has_math:
         raise ValueError(
-            f"persona {persona.student_id} has 数学 in both strong_subjects and weak_subjects"
+            f"persona {persona.student_id} has the math subject {MATH_SUBJECT!r} "
+            "in both strong_subjects and weak_subjects"
         )
     if strong_has_math:
         return "strong"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
@@ -30,18 +31,35 @@ from src.static_chain import (
     SelfEfficacyAnalysis,
     StudentInternalSignals,
     StudentModel,
+    build_default_interaction_decision_for_ablation,
+    build_default_item_response_state_for_ablation,
+    build_format_only_constraints,
     build_problem_profile,
-    build_student_model,
     build_student_item_interaction_decision,
-    compile_constraints,
+    build_student_model,
+    compile_behavior_harness,
     generate_prediction,
     map_student_model_to_internal_signals,
-    resolve_item_response_state,
+    infer_task_local_state,
 )
 
 
 ROOT = Path(__file__).resolve().parent
 JSONL_APPEND_LOCK = Lock()
+TRANSIENT_LLM_ERROR_MARKERS = (
+    "http error status=429",
+    "http error status=500",
+    "http error status=502",
+    "http error status=503",
+    "http error status=504",
+    "gateway timeout",
+    "stream timeout",
+    "timed out",
+    "timeout",
+    "connection reset",
+    "remote end closed connection",
+    "temporarily unavailable",
+)
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -75,11 +93,49 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
     return rows
 
 
+def is_transient_llm_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    messages: list[str] = []
+    current: BaseException | None = exc
+    while current is not None:
+        messages.append(str(current).lower())
+        current = current.__cause__
+    text = "\n".join(messages)
+    return any(marker in text for marker in TRANSIENT_LLM_ERROR_MARKERS)
+
+
+def result_with_transient_retry(
+    build_fn,
+    object_name: str,
+    object_id: str,
+    max_attempts: int = 4,
+    sleep_s: float = 2.0,
+):
+    last_error: BaseException | None = None
+    for attempt_idx in range(max_attempts):
+        try:
+            return build_fn()
+        except Exception as exc:
+            last_error = exc
+            if not is_transient_llm_error(exc) or attempt_idx + 1 >= max_attempts:
+                raise
+            wait_s = sleep_s * (attempt_idx + 1)
+            print(
+                f"[RetryObject] {object_name} id={object_id} "
+                f"attempt={attempt_idx + 1}/{max_attempts} "
+                f"error={type(exc).__name__}; sleep={wait_s:.1f}s",
+                flush=True,
+            )
+            time.sleep(wait_s)
+    raise RuntimeError(f"{object_name} id={object_id} failed after retry") from last_error
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run independent EEDI-static student simulation benchmark.")
     parser.add_argument(
         "--config_path",
-        default=str(ROOT / "configs" / "eedi_static_common_test_676x265_text_only_clean_20260520.json"),
+        default=str(ROOT / "configs" / "eedi_static_image_age_balanced_480x107_20260526.json"),
     )
     parser.add_argument("--output_root", default=str(ROOT / "outputs" / "eedi_static_benchmark"))
     parser.add_argument("--run_dir", default=None, help="Existing or new run directory. Existing cached objects are reused.")
@@ -92,12 +148,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm_api_key", default=os.environ.get("OPENAI_API_KEY", ""))
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max_tokens", type=int, default=1800)
-    parser.add_argument("--timeout_s", type=float, default=120.0)
-    parser.add_argument("--response_format_json", action="store_true")
+    parser.add_argument("--timeout_s", type=float, default=240.0)
+    parser.add_argument("--response_format_json", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--max_concurrency", type=int, default=4)
+    parser.add_argument(
+        "--object_concurrency",
+        type=int,
+        default=None,
+        help="Concurrency for cache-object construction. Defaults to --max_concurrency.",
+    )
     parser.add_argument("--generation_attempts", type=int, default=4)
     parser.add_argument("--task_retry_attempts", type=int, default=2)
-    parser.add_argument("--failure_rerun_rounds", type=int, default=3)
+    parser.add_argument("--failure_rerun_rounds", type=int, default=6)
+    parser.add_argument(
+        "--ablation_mode",
+        choices=[
+            "full",
+            "without_hachimi_prior",
+            "without_task_local_state",
+            "without_behavior_harness",
+        ],
+        default="full",
+    )
     parser.add_argument(
         "--hachimi_persona_paths",
         nargs="*",
@@ -148,8 +220,25 @@ def load_student_models(path: Path) -> dict[str, StudentModel]:
 
 def load_internal_signals(path: Path, student_ids: list[str]) -> dict[str, StudentInternalSignals]:
     rows = read_jsonl(path)
-    if len(rows) != len(student_ids):
-        raise ValueError(f"cannot map internal signals: rows={len(rows)} students={len(student_ids)}")
+    if len(rows) > len(student_ids):
+        raise ValueError(f"too many internal signal rows: rows={len(rows)} students={len(student_ids)}")
+    student_id_set = set(student_ids)
+    wrapped_rows = [row for row in rows if "student_id" in row or "signals" in row]
+    if wrapped_rows:
+        if len(wrapped_rows) != len(rows):
+            raise ValueError("internal signal cache mixes legacy rows and student_id-wrapped rows")
+        internal_signals: dict[str, StudentInternalSignals] = {}
+        for row in rows:
+            student_id = str(row.get("student_id") or "")
+            raw_signals = row.get("signals")
+            if student_id not in student_id_set:
+                raise ValueError(f"internal signal row has unknown student_id={student_id!r}")
+            if student_id in internal_signals:
+                raise ValueError(f"duplicate internal signal row for student_id={student_id!r}")
+            if not isinstance(raw_signals, dict):
+                raise ValueError(f"internal signal row for student_id={student_id!r} must contain signals object")
+            internal_signals[student_id] = StudentInternalSignals(**raw_signals)
+        return internal_signals
     return {
         student_id: StudentInternalSignals(**row)  # type: ignore[arg-type]
         for student_id, row in zip(student_ids, rows)
@@ -166,10 +255,24 @@ def build_or_load_student_models(
     students: list[EediStaticStudent],
     llm: OpenAICompatClient | None,
     hachimi_matches: dict[str, HachimiMatch] | None = None,
+    require_no_hachimi_prior: bool = False,
+    max_concurrency: int = 1,
 ) -> dict[str, StudentModel]:
     student_models = load_student_models(path) if path.exists() else {}
     if student_models:
         print(f"[Cache] loaded student_models={len(student_models)}", flush=True)
+    if require_no_hachimi_prior:
+        stale = [
+            student_id
+            for student_id, model in student_models.items()
+            if model.matched_hachimi_id is not None or model.hachimi_profile_card is not None
+        ]
+        if stale:
+            raise ValueError(
+                "existing student_models cache contains HACHIMI prior, but "
+                "ablation_mode=without_hachimi_prior; use a fresh run_dir or "
+                f"delete student_models.jsonl. stale_count={len(stale)}"
+            )
     if hachimi_matches:
         stale = [
             student_id
@@ -181,18 +284,25 @@ def build_or_load_student_models(
                 "existing student_models cache was built without HACHIMI; "
                 f"use a fresh run_dir or delete student_models.jsonl. stale_count={len(stale)}"
             )
-    for idx, student in enumerate(students, start=1):
-        if student.student_id in student_models:
-            continue
-        model = build_student_model(
-            student,
-            llm,
-            hachimi_match=hachimi_matches.get(student.student_id) if hachimi_matches else None,
-        )
-        student_models[student.student_id] = model
-        append_jsonl_row(path, asdict(model))
-        if len(student_models) == 1 or len(student_models) % 25 == 0 or idx == len(students):
-            print(f"[StudentModel] completed={len(student_models)}/{len(students)}", flush=True)
+    pending_students = [student for student in students if student.student_id not in student_models]
+    with ThreadPoolExecutor(max_workers=_assert_positive_concurrency(max_concurrency)) as executor:
+        future_to_student = {
+            executor.submit(
+                result_with_transient_retry,
+                lambda student=student: _build_student_model_pair(student, llm, hachimi_matches),
+                "StudentModel",
+                student.student_id,
+            ): student
+            for student in pending_students
+        }
+        for future in as_completed(future_to_student):
+            student_id, model = future.result()
+            if student_id in student_models:
+                raise ValueError(f"duplicate StudentModel for student_id={student_id!r}")
+            student_models[student_id] = model
+            append_jsonl_row(path, asdict(model))
+            if len(student_models) == 1 or len(student_models) % 25 == 0 or len(student_models) == len(students):
+                print(f"[StudentModel] completed={len(student_models)}/{len(students)}", flush=True)
     return student_models
 
 
@@ -201,6 +311,7 @@ def build_or_load_hachimi_matches(
     students: list[EediStaticStudent],
     hachimi_persona_paths: list[str],
     llm: OpenAICompatClient | None,
+    max_concurrency: int = 1,
 ) -> dict[str, HachimiMatch]:
     if not hachimi_persona_paths:
         return {}
@@ -224,17 +335,77 @@ def build_or_load_hachimi_matches(
             f"use a fresh run_dir or delete hachimi_matches.jsonl. stale_count={len(stale_matches)}"
         )
     personas = load_hachimi_personas([Path(raw_path) for raw_path in hachimi_persona_paths])
-    for idx, student in enumerate(students, start=1):
-        if student.student_id in matches:
-            continue
+    pending_students = [student for student in students if student.student_id not in matches]
+
+    def build_match(student: EediStaticStudent) -> HachimiMatch:
         observed_profile = build_eedi_observed_profile(student, age=student.age_floor)
         candidates = rank_hachimi_candidates(observed_profile, personas, top_k=8)
-        match = select_hachimi_match_with_llm(observed_profile, candidates, llm)
-        matches[student.student_id] = match
-        append_jsonl_row(path, match.to_row())
-        if len(matches) == 1 or len(matches) % 25 == 0 or idx == len(students):
-            print(f"[HACHIMI] completed={len(matches)}/{len(students)}", flush=True)
+        return select_hachimi_match_with_llm(observed_profile, candidates, llm)
+
+    with ThreadPoolExecutor(max_workers=_assert_positive_concurrency(max_concurrency)) as executor:
+        future_to_student = {
+            executor.submit(
+                result_with_transient_retry,
+                lambda student=student: build_match(student),
+                "HACHIMI",
+                student.student_id,
+            ): student
+            for student in pending_students
+        }
+        for future in as_completed(future_to_student):
+            match = future.result()
+            if match.student_id in matches:
+                raise ValueError(f"duplicate HACHIMI match for student_id={match.student_id!r}")
+            matches[match.student_id] = match
+            append_jsonl_row(path, match.to_row())
+            if len(matches) == 1 or len(matches) % 25 == 0 or len(matches) == len(students):
+                print(f"[HACHIMI] completed={len(matches)}/{len(students)}", flush=True)
     return matches
+
+
+def _internal_signal_row(student_id: str, signals: StudentInternalSignals) -> dict[str, object]:
+    return {"student_id": student_id, "signals": asdict(signals)}
+
+
+def _append_internal_signal_row(path: Path, student_id: str, signals: StudentInternalSignals) -> None:
+    append_jsonl_row(path, _internal_signal_row(student_id, signals))
+
+
+def _build_student_model_pair(
+    student: EediStaticStudent,
+    llm: OpenAICompatClient | None,
+    hachimi_matches: dict[str, HachimiMatch] | None,
+) -> tuple[str, StudentModel]:
+    return (
+        student.student_id,
+        build_student_model(
+            student,
+            llm,
+            hachimi_match=hachimi_matches.get(student.student_id) if hachimi_matches else None,
+        ),
+    )
+
+
+def _build_internal_signal_pair(
+    student_id: str,
+    student_models: dict[str, StudentModel],
+    llm: OpenAICompatClient | None,
+) -> tuple[str, StudentInternalSignals]:
+    return student_id, map_student_model_to_internal_signals(student_models[student_id], llm)
+
+
+def _build_problem_profile_pair(
+    question: EediStaticQuestion,
+    llm: OpenAICompatClient | None,
+) -> tuple[str, ProblemRequirementProfile]:
+    profile = build_problem_profile(question, llm)
+    return question.question_id, profile
+
+
+def _assert_positive_concurrency(max_concurrency: int) -> int:
+    if max_concurrency < 1:
+        raise ValueError("max_concurrency must be >= 1")
+    return max_concurrency
 
 
 def build_or_load_internal_signals(
@@ -242,25 +413,30 @@ def build_or_load_internal_signals(
     student_ids: list[str],
     student_models: dict[str, StudentModel],
     llm: OpenAICompatClient | None,
+    max_concurrency: int = 1,
 ) -> dict[str, StudentInternalSignals]:
-    rows = read_jsonl(path)
-    internal_signals: dict[str, StudentInternalSignals] = {}
-    if rows:
-        if len(rows) > len(student_ids):
-            raise ValueError(f"too many internal signal rows: rows={len(rows)} students={len(student_ids)}")
-        internal_signals = {
-            student_id: StudentInternalSignals(**row)  # type: ignore[arg-type]
-            for student_id, row in zip(student_ids, rows)
-        }
+    internal_signals = load_internal_signals(path, student_ids) if path.exists() else {}
+    if internal_signals:
         print(f"[Cache] loaded internal_signals={len(internal_signals)}", flush=True)
-    for idx, student_id in enumerate(student_ids, start=1):
-        if student_id in internal_signals:
-            continue
-        signals = map_student_model_to_internal_signals(student_models[student_id], llm)
-        internal_signals[student_id] = signals
-        append_jsonl_row(path, asdict(signals))
-        if len(internal_signals) == 1 or len(internal_signals) % 25 == 0 or idx == len(student_ids):
-            print(f"[InternalSignals] completed={len(internal_signals)}/{len(student_ids)}", flush=True)
+    pending_student_ids = [student_id for student_id in student_ids if student_id not in internal_signals]
+    with ThreadPoolExecutor(max_workers=_assert_positive_concurrency(max_concurrency)) as executor:
+        future_to_student_id = {
+            executor.submit(
+                result_with_transient_retry,
+                lambda student_id=student_id: _build_internal_signal_pair(student_id, student_models, llm),
+                "StudentInternalSignals",
+                student_id,
+            ): student_id
+            for student_id in pending_student_ids
+        }
+        for future in as_completed(future_to_student_id):
+            student_id, signals = future.result()
+            if student_id in internal_signals:
+                raise ValueError(f"duplicate internal signals for student_id={student_id!r}")
+            internal_signals[student_id] = signals
+            _append_internal_signal_row(path, student_id, signals)
+            if len(internal_signals) == 1 or len(internal_signals) % 25 == 0 or len(internal_signals) == len(student_ids):
+                print(f"[InternalSignals] completed={len(internal_signals)}/{len(student_ids)}", flush=True)
     return internal_signals
 
 
@@ -268,18 +444,30 @@ def build_or_load_problem_profiles(
     path: Path,
     questions: list[EediStaticQuestion],
     llm: OpenAICompatClient | None,
+    max_concurrency: int = 1,
 ) -> dict[str, ProblemRequirementProfile]:
     problem_profiles = load_problem_profiles(path) if path.exists() else {}
     if problem_profiles:
         print(f"[Cache] loaded problem_profiles={len(problem_profiles)}", flush=True)
-    for idx, question in enumerate(questions, start=1):
-        if question.question_id in problem_profiles:
-            continue
-        profile = build_problem_profile(question, llm)
-        problem_profiles[question.question_id] = profile
-        append_jsonl_row(path, asdict(profile))
-        if len(problem_profiles) == 1 or len(problem_profiles) % 10 == 0 or idx == len(questions):
-            print(f"[ProblemProfile] completed={len(problem_profiles)}/{len(questions)}", flush=True)
+    pending_questions = [question for question in questions if question.question_id not in problem_profiles]
+    with ThreadPoolExecutor(max_workers=_assert_positive_concurrency(max_concurrency)) as executor:
+        future_to_question = {
+            executor.submit(
+                result_with_transient_retry,
+                lambda question=question: _build_problem_profile_pair(question, llm),
+                "ProblemProfile",
+                question.question_id,
+            ): question
+            for question in pending_questions
+        }
+        for future in as_completed(future_to_question):
+            question_id, profile = future.result()
+            if question_id in problem_profiles:
+                raise ValueError(f"duplicate ProblemRequirementProfile for question_id={question_id!r}")
+            problem_profiles[question_id] = profile
+            append_jsonl_row(path, asdict(profile))
+            if len(problem_profiles) == 1 or len(problem_profiles) % 10 == 0 or len(problem_profiles) == len(questions):
+                print(f"[ProblemProfile] completed={len(problem_profiles)}/{len(questions)}", flush=True)
     return problem_profiles
 
 
@@ -309,22 +497,32 @@ def run_single_prediction(
     problem_profile,
     llm: OpenAICompatClient | None,
     max_generation_attempts: int,
+    ablation_mode: str,
 ) -> Prediction:
-    interaction = build_student_item_interaction_decision(
-        student_model=student_model,
-        internal_signals=internal_signals,
-        profile=problem_profile,
-        question=question,
-        llm=llm,
-    )
-    response_state = resolve_item_response_state(
-        student_model=student_model,
-        internal_signals=internal_signals,
-        profile=problem_profile,
-        interaction_decision=interaction,
-        llm=llm,
-    )
-    constraints = compile_constraints(response_state)
+    if ablation_mode == "without_task_local_state":
+        interaction = build_default_interaction_decision_for_ablation()
+        response_state = build_default_item_response_state_for_ablation()
+        constraints = build_format_only_constraints(["1", "2", "3", "4"])
+    else:
+        interaction = build_student_item_interaction_decision(
+            student_model=student_model,
+            internal_signals=internal_signals,
+            profile=problem_profile,
+            question=question,
+            llm=llm,
+        )
+        response_state = infer_task_local_state(
+            student_model=student_model,
+            internal_signals=internal_signals,
+            profile=problem_profile,
+            interaction_decision=interaction,
+            llm=llm,
+        )
+        constraints = (
+            build_format_only_constraints(["1", "2", "3", "4"])
+            if ablation_mode == "without_behavior_harness"
+            else compile_behavior_harness(response_state)
+        )
     return generate_prediction(
         student=student,
         question=question,
@@ -336,6 +534,7 @@ def run_single_prediction(
         constraints=constraints,
         llm=llm,
         max_generation_attempts=max_generation_attempts,
+        use_behavior_harness=ablation_mode != "without_behavior_harness",
     )
 
 
@@ -348,6 +547,7 @@ def run_prediction_task_with_retries(
     llm: OpenAICompatClient | None,
     max_generation_attempts: int,
     task_retry_attempts: int,
+    ablation_mode: str,
 ) -> Prediction:
     if task_retry_attempts < 1:
         raise ValueError("task_retry_attempts must be >= 1")
@@ -362,6 +562,7 @@ def run_prediction_task_with_retries(
                 problem_profile=problem_profile,
                 llm=llm,
                 max_generation_attempts=max_generation_attempts,
+                ablation_mode=ablation_mode,
             )
         except Exception as exc:
             last_error = exc
@@ -411,6 +612,9 @@ def main() -> None:
         max_questions=args.max_questions,
     )
     llm = make_llm(args)
+    object_concurrency = args.object_concurrency or args.max_concurrency
+    if object_concurrency < 1:
+        raise ValueError("--object_concurrency must be positive")
 
     if args.run_dir:
         run_dir = Path(args.run_dir)
@@ -429,13 +633,15 @@ def main() -> None:
                 "dry_run": args.dry_run,
                 "llm_base_url": args.llm_base_url,
                 "llm_model": args.llm_model,
-            "max_concurrency": args.max_concurrency,
-            "generation_attempts": args.generation_attempts,
-            "task_retry_attempts": args.task_retry_attempts,
-            "failure_rerun_rounds": args.failure_rerun_rounds,
-            "hachimi_persona_paths": args.hachimi_persona_paths,
-        },
-    )
+                "max_concurrency": args.max_concurrency,
+                "object_concurrency": object_concurrency,
+                "generation_attempts": args.generation_attempts,
+                "task_retry_attempts": args.task_retry_attempts,
+                "failure_rerun_rounds": args.failure_rerun_rounds,
+                "ablation_mode": args.ablation_mode,
+                "hachimi_persona_paths": args.hachimi_persona_paths,
+            },
+        )
 
     question_ids = list(dataset.questions)
     questions = [dataset.questions[question_id] for question_id in question_ids]
@@ -450,25 +656,37 @@ def main() -> None:
         write_jsonl(run_dir / "history_summaries.jsonl", [summarize_history(student) for student in students])
 
     student_ids = [student.student_id for student in students]
+    effective_hachimi_persona_paths = (
+        [] if args.ablation_mode == "without_hachimi_prior" else args.hachimi_persona_paths
+    )
     hachimi_matches = build_or_load_hachimi_matches(
         run_dir / "hachimi_matches.jsonl",
         students,
-        args.hachimi_persona_paths,
+        effective_hachimi_persona_paths,
         llm,
+        max_concurrency=object_concurrency,
     )
     student_models = build_or_load_student_models(
         run_dir / "student_models.jsonl",
         students,
         llm,
         hachimi_matches=hachimi_matches,
+        require_no_hachimi_prior=args.ablation_mode == "without_hachimi_prior",
+        max_concurrency=object_concurrency,
     )
     internal_signals = build_or_load_internal_signals(
         run_dir / "student_internal_signals.jsonl",
         student_ids,
         student_models,
         llm,
+        max_concurrency=object_concurrency,
     )
-    problem_profiles = build_or_load_problem_profiles(run_dir / "problem_profiles.jsonl", questions, llm)
+    problem_profiles = build_or_load_problem_profiles(
+        run_dir / "problem_profiles.jsonl",
+        questions,
+        llm,
+        max_concurrency=object_concurrency,
+    )
 
     predictions: list[Prediction] = []
     prediction_path = run_dir / "predictions.jsonl"
@@ -511,6 +729,7 @@ def main() -> None:
                     llm,
                     args.generation_attempts,
                     args.task_retry_attempts,
+                    args.ablation_mode,
                 )
                 tasks[future] = {
                     "student_id": student.student_id,

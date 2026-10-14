@@ -1,33 +1,40 @@
-# ENEM 静态自然科学学生模拟
+# ENEM static natural-science student simulation
 
-本目录是 ENEM 2024 的独立静态模拟实现。
+Standalone static-simulation implementation for ENEM 2024. It does not reuse the
+`static/xes` entry point and does not import the XES code, but the method layer
+follows the same meta-method:
 
-它不复用 `static/xes` 的入口，也不 import XES 代码。  
-方法层保持同一套元方法：
+```
+history/calibration -> observed profile -> persona match -> StudentModel -> StudentInternalSignals -> ProblemProfile -> StudentItemInteraction -> ItemResponseState -> ConstraintBundle -> StudentAnswer -> offline evaluation
+```
 
-`history/calibration -> observed profile -> HACHIMI match -> StudentModel -> ProblemProfile -> StudentItemInteraction -> ItemResponseState -> ConstraintBundle -> StudentAnswer -> offline evaluation`
+## Scope
 
-## 当前范围
+- Dataset: ENEM 2024 microdata.
+- Current main subject: `CN` (Ciências da Natureza, natural sciences).
+- Item type: five-option (A/B/C/D/E) objective items.
+- History: a subset of items within the same subject used as calibration
+  history.
+- Test: the remaining items are the prediction targets.
 
-- 数据集：ENEM 2024 microdata。
-- 当前主学科：`CN`，即 Ciências da Natureza，自然科学。
-- 题型：A/B/C/D/E 五选一客观题。
-- history 定义：同一科内一部分题作为 calibration history。
-- test 定义：剩余题作为预测目标。
+ENEM is not longitudinal learning-history data, so history here is not a time
+series but the visible calibration items within a single exam.
 
-ENEM 不是长期学习历史数据，所以这里的 history 不是时间序列学习记录，而是同一张考试中的可见校准题。
+## Natural-science instantiation
 
-## 自然科学理论依据
+The ENEM-CN fields are not renamed math fields; they are re-instantiated for a
+natural-science framework:
 
-ENEM-CN 字段不是从数学字段改名而来，而是按自然科学教育框架重新实例化：
+- ENEM's official natural-science competency matrix: `H1-H30` and 8 competency
+  areas.
+- NRC / NGSS science frameworks: science practices, core ideas, crosscutting
+  concepts.
+- PISA science framework: explain phenomena, interpret data and evidence,
+  evaluate scientific inquiry.
 
-- ENEM 官方自然科学能力矩阵：`H1-H30` 与 8 个能力区。
-- NRC / NGSS 科学学习框架：科学实践、核心概念、跨领域联系。
-- PISA science framework：解释现象、解释数据证据、评价科学探究。
-
-因此自然科学学生能力对象使用 `ScienceTaskCapabilityProfile`，而不是 XES 的 `MathTaskCapabilityProfile`。
-
-核心字段包括：
+Accordingly the science student-capability object uses
+`ScienceTaskCapabilityProfile` rather than XES's `MathTaskCapabilityProfile`.
+Core fields include:
 
 - `scientific_concept_recall`
 - `phenomenon_explanation`
@@ -43,39 +50,95 @@ ENEM-CN 字段不是从数学字段改名而来，而是按自然科学教育框
 - `confidence_calibration`
 - `format_discipline`
 
-## 关键反作弊边界
+## Data boundary
 
-生成路径禁止使用：
+The generation path may not use:
 
-- test 题真实作答。
-- test 题真实正确性。
-- 官方正确答案。
-- ENEM 总分。
-- item IRT 难度或真实统计难度。
+- the real answer to a test item
+- the real correctness of a test item
+- the official correct answer
+- the ENEM total score
+- item IRT difficulty or empirical difficulty
 
-IRT `NU_PARAM_B` 只允许用于离线均衡切分 history/test，不进入 prompt。
+The IRT `NU_PARAM_B` parameter may be used only for the offline balanced
+history/test split; it does not enter the prompt.
 
-## 运行 smoke test
+## Default set
+
+- Config: `configs/enem_cn_static_english_text_plus_image_20260529.json`
+  (the set of the reported runs): 44 common CN items, of which `20` are the
+  calibration history and `24` are test items.
+- Students: `--max_students 7200` by default, `1800` per ability band.
+- Item content: the English item text from `question_text_manifest.jsonl`
+  together with the cropped item image. The two manifest paths in the config
+  are resolved relative to `configs/`.
+
+The item crops are produced with `--build_page_images`, and the English item
+text with:
 
 ```powershell
-python static\enem\run_enem_static_benchmark.py --dry_run --max_students 4 --max_questions 2 --max_concurrency 2
+python static\enem\run_translate_question_images.py `
+  --config_path static\enem\configs\enem_cn_static_smoke_20260528.json `
+  --build_page_images `
+  --run_dir static\enem\outputs\enem_cn_question_text_translation\qwen35_en_44_20260529 `
+  --llm_base_url <BASE_URL> --llm_model <MODEL> --llm_api_key <API_KEY>
 ```
 
-## 运行多模态版本
+## Smoke test
 
-`--build_page_images` 会先从官方 PDF 生成单题裁剪图清单。  
-参数名保留 `page_images` 是为了少改运行入口，但现在传入模型的是每道题自己的裁剪图，不是整页图。
+```powershell
+python static\enem\run_enem_static_benchmark.py --config_path static\enem\configs\enem_cn_static_smoke_20260528.json --dry_run --max_students 4 --max_questions 2 --max_concurrency 2
+```
 
-裁剪图是 ENEM 级缓存，不是 run 级临时文件。  
-默认保存到：
-
-`static/enem/cache/question_images/CN_1419_dpi150_bbox_column_crop_v1/`
-
-同一套 PDF、学科、基准卷、DPI、裁剪算法版本不变时，后续运行会直接复用这里的图片和 `question_image_manifest.jsonl`。
-如果缓存清单存在但题目数、DPI、裁剪版本或图片文件不一致，程序会直接报错，不做静默重建。
+## Reported run
 
 ```powershell
 python static\enem\run_enem_static_benchmark.py `
+  --config_path static\enem\configs\enem_cn_static_english_text_plus_image_20260529.json `
+  --max_students 7200 --ablation_mode full `
+  --llm_base_url <BASE_URL> --llm_model <MODEL> --llm_api_key <API_KEY> `
+  --temperature 0.2 --max_tokens 1800 --timeout_s 240 --response_format_json `
+  --generation_attempts 8 --task_retry_attempts 6 --failure_rerun_rounds 6 `
+  --hachimi_persona_paths <personas.jsonl>
+```
+
+`--ablation_mode` selects `full`, `without_hachimi_prior`,
+`without_task_local_state`, or `without_behavior_harness`. Without
+`--hachimi_persona_paths` no persona is matched. `--student_shard_index` and
+`--student_shard_count` split the students across parallel processes. The
+reported runs use four shards (`<shard_root>/shard_00_of_04` ...
+`shard_03_of_04` as `--run_dir`), merged and evaluated with:
+
+```powershell
+python static\enem\merge_enem_shards.py `
+  --config_path static\enem\configs\enem_cn_static_english_text_plus_image_20260529.json `
+  --max_students 7200 --shard_count 4 `
+  --shard_root <shard_root> --merged_run_dir <merged_run_dir>
+```
+
+The merged directory holds `predictions.jsonl`, `eval_rows.jsonl`,
+`metrics.json`, and `shard_manifest.json`.
+
+## Multimodal run
+
+`--build_page_images` first generates a per-item cropped-image manifest from the
+official PDF. The argument name `page_images` is retained to avoid changing the
+entry point, but what is sent to the model is each item's own crop, not the full
+page.
+
+The crops are an ENEM-level cache, not run-level temporary files. By default they
+are saved under:
+
+`static/enem/cache/question_images/CN_1419_dpi150_bbox_column_crop_v1/`
+
+For the same PDF, subject, base paper, DPI, and crop-algorithm version, later
+runs reuse these images and `question_image_manifest.jsonl`. If the cache
+manifest exists but item count, DPI, crop version, or image files disagree, the
+program raises rather than silently rebuilding.
+
+```powershell
+python static\enem\run_enem_static_benchmark.py `
+  --config_path static\enem\configs\enem_cn_static_smoke_20260528.json `
   --build_page_images `
   --max_students 20 `
   --max_questions 4 `
@@ -85,15 +148,17 @@ python static\enem\run_enem_static_benchmark.py `
   --response_format_json
 ```
 
-裁剪方式：
+Cropping:
 
-- 用 `pdftotext -bbox` 读取 PDF 文字层里的 `QUESTÃO xx` 坐标。
-- 常规双栏页面按左栏 / 右栏裁剪。
-- 整页宽排页面按 full-width 裁剪，避免像第 135 题这种题干被截断。
-- 清单里会记录 `crop_mode`、`crop_box`、`page_number`、`column`、`dpi`，方便审计。
+- `QUESTÃO xx` coordinates are read from the PDF text layer via
+  `pdftotext -bbox`.
+- Standard two-column pages are cropped per left/right column.
+- Full-width pages are cropped full-width to avoid truncating long stems.
+- The manifest records `crop_mode`, `crop_box`, `page_number`, `column`, and
+  `dpi` for auditing.
 
-当前审计要求：
+Crop invariants:
 
-- 44 道 CN 公共题必须全部生成裁剪图。
-- 每个裁剪框必须包含本题题号。
-- 每个裁剪框不能包含其他题题号。
+- All common CN items must produce a crop.
+- Each crop box must contain its own item number.
+- Each crop box must not contain another item's number.

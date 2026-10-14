@@ -5,9 +5,9 @@ from dataclasses import asdict, dataclass
 
 from .dialogue_context import DialogueContextState
 from .llm_client import OpenAICompatClient, require_keys
-from .population_calibration import (
-    PopulationCalibrationSummary,
-    population_calibration_summary_to_dict,
+from .persona_prior import (
+    PersonaPriorSummary,
+    persona_prior_summary_to_dict,
 )
 from .prompts import INTERACTION_STATE_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
@@ -58,7 +58,7 @@ MATURITY_CAPS = (
 
 
 @dataclass(frozen=True)
-class InteractionState:
+class TaskLocalLearnerState:
     competence_position: str
     misconception_status: str
     metacognitive_regulation_state: str
@@ -71,19 +71,19 @@ class InteractionState:
     state_evidence: list[str]
 
 
-def resolve_interaction_state(
+def infer_task_local_state(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
     llm_client: OpenAICompatClient,
-    population_calibration_summary: PopulationCalibrationSummary | None = None,
-) -> InteractionState:
+    persona_prior_summary: PersonaPriorSummary | None = None,
+) -> TaskLocalLearnerState:
     payload = {
         "student_context_profile": asdict(student_context_profile),
         "dialogue_context": asdict(context),
         "tutor_turn_profile": asdict(tutor_profile),
-        "population_calibration_summary": population_calibration_summary_to_dict(
-            population_calibration_summary
+        "persona_prior_summary": persona_prior_summary_to_dict(
+            persona_prior_summary
         ),
         "state_definitions": {
             "competence_position": list(COMPETENCE_POSITIONS),
@@ -126,11 +126,11 @@ def resolve_interaction_state(
         return _parse_interaction_state(repaired)
 
 
-def interaction_state_to_dict(state: InteractionState) -> dict[str, object]:
+def interaction_state_to_dict(state: TaskLocalLearnerState) -> dict[str, object]:
     return asdict(state)
 
 
-def _parse_interaction_state(parsed: object) -> InteractionState:
+def _parse_interaction_state(parsed: object) -> TaskLocalLearnerState:
     parsed = require_keys(
         parsed,
         (
@@ -145,9 +145,9 @@ def _parse_interaction_state(parsed: object) -> InteractionState:
             "response_maturity_cap",
             "state_evidence",
         ),
-        "InteractionState",
+        "task-local learner state",
     )
-    return InteractionState(
+    return TaskLocalLearnerState(
         competence_position=_coerce_enum(
             parsed["competence_position"],
             COMPETENCE_POSITIONS,

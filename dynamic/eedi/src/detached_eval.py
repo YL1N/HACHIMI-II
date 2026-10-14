@@ -5,6 +5,7 @@ import json
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -16,6 +17,7 @@ from rouge_score import rouge_scorer
 from .evaluation_eedi import write_json, write_jsonl
 from .llm_client import LLMConfig
 from .theory_error_eval import (
+    _evaluate_single_row as _evaluate_single_theory_row,
     _gold_turn_is_officially_incorrect,
     evaluate_theory_error_rows,
     load_theory_error_rows,
@@ -36,22 +38,63 @@ class OpenAICompatTextClient:
         self._cfg = config
         self._chat_url = config.base_url.rstrip("/") + "/chat/completions"
 
+    # Retry transient connection/endpoint failures (e.g. WinError 10054 reset,
+    # timeouts, 5xx) instead of crashing the whole eval. Content errors are NOT
+    # retried (handled below). Mirrors the retry loop in RemoteEmbeddingClient.
+    _CHAT_MAX_RETRIES = 8
+    _CHAT_RETRY_SLEEP_S = 3.0
+    _TRANSIENT_MARKERS = (
+        "url error",
+        "10054",
+        "10053",
+        "timed out",
+        "timeout",
+        "connection",
+        "reset",
+        "remote end closed",
+        "temporarily unavailable",
+        "bad gateway",
+        "502",
+        "503",
+        "504",
+        "520",
+        "521",
+        "522",
+        "523",
+        "524",
+        "gateway time-out",
+        "error code: 5",
+        "max retries",
+    )
+
     def chat_text(self, system_prompt: str, user_prompt: str) -> str:
         payload = {
             "model": self._cfg.model,
             "temperature": self._cfg.temperature,
             "max_tokens": self._cfg.max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
         }
-        body = _post_json(
-            url=self._chat_url,
-            api_key=self._cfg.api_key,
-            payload=payload,
-            timeout_s=self._cfg.timeout_s,
-        )
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                body = _post_json(
+                    url=self._chat_url,
+                    api_key=self._cfg.api_key,
+                    payload=payload,
+                    timeout_s=self._cfg.timeout_s,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - retry only transient
+                msg = str(exc).lower()
+                transient = any(m in msg for m in self._TRANSIENT_MARKERS)
+                if not transient or attempt > self._CHAT_MAX_RETRIES:
+                    raise
+                time.sleep(self._CHAT_RETRY_SLEEP_S)
         try:
             content = body["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -134,31 +177,75 @@ def run_detached_eval(
         and str(embedding_api_key or "").strip()
     )
 
+    if should_compute_text_similarity:
+        return _run_detached_eval_batch_with_embeddings(
+            rows=rows,
+            output_dir=output_dir,
+            llm_config=llm_config,
+            embedding_base_url=embedding_base_url,
+            embedding_model=embedding_model,
+            embedding_api_key=embedding_api_key,
+            embedding_batch_size=embedding_batch_size,
+            embedding_timeout_s=embedding_timeout_s,
+            embedding_max_retries=embedding_max_retries,
+            embedding_retry_sleep_s=embedding_retry_sleep_s,
+            max_concurrency=max_concurrency,
+        )
+
+    combined_records = run_detached_eval_streaming(
+        rows=rows,
+        output_dir=output_dir,
+        llm_config=llm_config,
+        max_concurrency=max_concurrency,
+    )
+    summary = build_detached_eval_summary(combined_records)
+    write_detached_eval_outputs(
+        output_dir=output_dir,
+        records=combined_records,
+        summary=summary,
+    )
+    _write_detached_eval_progress(
+        progress_path=output_dir / "detached_eval_progress.json",
+        expected_rows=len(rows),
+        completed_rows=len(combined_records),
+        pending_rows=len(rows) - len(combined_records),
+        status="completed",
+    )
+    return summary
+
+
+def _run_detached_eval_batch_with_embeddings(
+    rows: list[dict[str, Any]],
+    output_dir: Path,
+    llm_config: LLMConfig,
+    embedding_base_url: str,
+    embedding_model: str,
+    embedding_api_key: str,
+    embedding_batch_size: int,
+    embedding_timeout_s: float,
+    embedding_max_retries: int,
+    embedding_retry_sleep_s: float,
+    max_concurrency: int,
+) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=2) as executor:
-        text_future = None
-        if should_compute_text_similarity:
-            text_future = executor.submit(
-                compute_text_similarity,
-                rows=rows,
-                embedding_base_url=embedding_base_url,
-                embedding_model=embedding_model,
-                embedding_api_key=embedding_api_key,
-                embedding_batch_size=embedding_batch_size,
-                embedding_timeout_s=embedding_timeout_s,
-                embedding_max_retries=embedding_max_retries,
-                embedding_retry_sleep_s=embedding_retry_sleep_s,
-            )
+        text_future = executor.submit(
+            compute_text_similarity,
+            rows=rows,
+            embedding_base_url=embedding_base_url,
+            embedding_model=embedding_model,
+            embedding_api_key=embedding_api_key,
+            embedding_batch_size=embedding_batch_size,
+            embedding_timeout_s=embedding_timeout_s,
+            embedding_max_retries=embedding_max_retries,
+            embedding_retry_sleep_s=embedding_retry_sleep_s,
+        )
         correctness_future = executor.submit(
             evaluate_official_correctness,
             rows=rows,
             llm_config=llm_config,
             max_concurrency=max_concurrency,
         )
-        text_scores = (
-            text_future.result()
-            if text_future is not None
-            else build_empty_text_similarity(rows)
-        )
+        text_scores = text_future.result()
         correctness_records = correctness_future.result()
     theory_rows = [row for row in rows if _gold_turn_is_officially_incorrect(row)]
     theory_records = evaluate_theory_error_rows(
@@ -180,6 +267,106 @@ def run_detached_eval(
         summary=summary,
     )
     return summary
+
+
+def run_detached_eval_streaming(
+    rows: list[dict[str, Any]],
+    output_dir: Path,
+    llm_config: LLMConfig,
+    max_concurrency: int,
+) -> list[dict[str, Any]]:
+    if max_concurrency <= 0:
+        raise ValueError("max_concurrency must be > 0")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    results_path = output_dir / "detached_eval_results.jsonl"
+    progress_path = output_dir / "detached_eval_progress.json"
+    existing_records = _load_existing_detached_records(results_path)
+    completed_uids = {str(row["uid"]) for row in existing_records}
+    pending_rows = [row for row in rows if _row_uid(row) not in completed_uids]
+    _write_detached_eval_progress(
+        progress_path=progress_path,
+        expected_rows=len(rows),
+        completed_rows=len(existing_records),
+        pending_rows=len(pending_rows),
+        status="running",
+    )
+    if pending_rows:
+        client = OpenAICompatTextClient(llm_config)
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            future_map = {
+                executor.submit(_evaluate_single_streaming_row, client, row, llm_config): row
+                for row in pending_rows
+            }
+            completed_since_start = 0
+            for future in as_completed(future_map):
+                record = future.result()
+                _append_jsonl(results_path, record)
+                existing_records.append(record)
+                completed_since_start += 1
+                _write_detached_eval_progress(
+                    progress_path=progress_path,
+                    expected_rows=len(rows),
+                    completed_rows=len(existing_records),
+                    pending_rows=len(rows) - len(existing_records),
+                    status="running",
+                )
+                if completed_since_start % 100 == 0:
+                    print(
+                        json.dumps(
+                            {
+                                "event": "detached_eval_progress",
+                                "completed_rows": len(existing_records),
+                                "expected_rows": len(rows),
+                                "pending_rows": len(rows) - len(existing_records),
+                            },
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+    existing_records.sort(key=lambda row: (row["dialogue_idx"], row["turn_idx"], row["uid"]))
+    _write_detached_eval_progress(
+        progress_path=progress_path,
+        expected_rows=len(rows),
+        completed_rows=len(existing_records),
+        pending_rows=len(rows) - len(existing_records),
+        status="finalizing",
+    )
+    return existing_records
+
+
+def _evaluate_single_streaming_row(
+    client: OpenAICompatTextClient,
+    row: dict[str, Any],
+    llm_config: LLMConfig,
+) -> dict[str, Any]:
+    uid = _row_uid(row)
+    gt_label = _get_gt_correctness_label(row)
+    text_scores = _compute_single_text_similarity(row)
+    correctness = None
+    if gt_label != "na":
+        correctness = _evaluate_single_correctness_row(client, row)
+    theory = None
+    if _gold_turn_is_officially_incorrect(row):
+        theory = _evaluate_single_theory_row(row, llm_config)
+    return _build_single_detached_eval_record(
+        row=row,
+        uid=uid,
+        text_scores=text_scores,
+        correctness=correctness,
+        theory=theory,
+    )
+
+
+def _compute_single_text_similarity(row: dict[str, Any]) -> dict[str, float | None]:
+    scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
+    score = scorer.score(
+        target=str(row.get("gt_turn", "") or ""),
+        prediction=str(row.get("pred_turn", "") or ""),
+    )["rougeL"].fmeasure
+    return {
+        "rougeL": float(score),
+        "cosine_similarity": None,
+    }
 
 
 def build_empty_text_similarity(
@@ -339,6 +526,124 @@ def build_detached_eval_records(
         )
     combined.sort(key=lambda row: (row["dialogue_idx"], row["turn_idx"], row["uid"]))
     return combined
+
+
+def _build_single_detached_eval_record(
+    row: dict[str, Any],
+    uid: str,
+    text_scores: dict[str, float | None],
+    correctness: dict[str, Any] | None,
+    theory: dict[str, Any] | None,
+) -> dict[str, Any]:
+    gt_label = _get_gt_correctness_label(row)
+    pred_label = (
+        None
+        if correctness is None
+        else correctness.get("pred_correctness_label")
+    )
+    same_error_all3 = None
+    if theory is not None and not bool(theory.get("judge_failed")):
+        if (
+            theory.get("gold_has_codable_math_error") is True
+            and theory.get("pred_has_codable_math_error") is True
+        ):
+            same_error_all3 = bool(
+                theory.get("same_knowledge_type")
+                and theory.get("same_error_locus")
+                and theory.get("same_error_mechanism")
+            )
+        else:
+            same_error_all3 = False
+    return {
+        "uid": uid,
+        "key": str(row.get("key", "") or ""),
+        "dialogue_idx": int(row["dialogue_idx"]),
+        "turn_idx": int(row["turn_idx"]),
+        "gt_turn": str(row.get("gt_turn", "") or ""),
+        "pred_turn": str(row.get("pred_turn", "") or ""),
+        "rougeL": text_scores["rougeL"],
+        "cosine_similarity": text_scores["cosine_similarity"],
+        "official_gt_correctness_label": gt_label,
+        "official_pred_correctness_label": pred_label,
+        "official_correctness_match": (
+            None if correctness is None else correctness.get("correctness_match")
+        ),
+        "official_correctness_judge_raw": (
+            "" if correctness is None else correctness.get("judge_raw", "")
+        ),
+        "gold_has_codable_math_error": (
+            None if theory is None else theory.get("gold_has_codable_math_error")
+        ),
+        "pred_has_codable_math_error": (
+            None if theory is None else theory.get("pred_has_codable_math_error")
+        ),
+        "same_knowledge_type": (
+            None if theory is None else theory.get("same_knowledge_type")
+        ),
+        "same_error_locus": (
+            None if theory is None else theory.get("same_error_locus")
+        ),
+        "same_error_mechanism": (
+            None if theory is None else theory.get("same_error_mechanism")
+        ),
+        "same_error_all3": same_error_all3,
+        "judge_failed": None if theory is None else theory.get("judge_failed"),
+        "gold_judge_error": "" if theory is None else theory.get("gold_judge_error", ""),
+        "pred_judge_error": "" if theory is None else theory.get("pred_judge_error", ""),
+        "gold_code": None if theory is None else theory.get("gold_code"),
+        "pred_code": None if theory is None else theory.get("pred_code"),
+    }
+
+
+def _load_existing_detached_records(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    seen_uids: set[str] = set()
+    with path.open("r", encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                record = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSONL at {path}:{line_number}") from exc
+            if not isinstance(record, dict):
+                raise ValueError(f"record must be object at {path}:{line_number}")
+            uid = str(record.get("uid", "") or "")
+            if not uid:
+                raise ValueError(f"record missing uid at {path}:{line_number}")
+            if uid in seen_uids:
+                raise ValueError(f"duplicate uid in existing detached eval output: {uid}")
+            seen_uids.add(uid)
+            records.append(record)
+    return records
+
+
+def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        f.flush()
+
+
+def _write_detached_eval_progress(
+    progress_path: Path,
+    expected_rows: int,
+    completed_rows: int,
+    pending_rows: int,
+    status: str,
+) -> None:
+    write_json(
+        progress_path,
+        {
+            "status": status,
+            "expected_rows": expected_rows,
+            "completed_rows": completed_rows,
+            "pending_rows": pending_rows,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
 def build_detached_eval_summary(records: list[dict[str, Any]]) -> dict[str, Any]:

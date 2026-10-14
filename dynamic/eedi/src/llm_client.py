@@ -149,6 +149,10 @@ class OpenAICompatClient:
             "temperature": self._cfg.temperature,
             "max_tokens": self._cfg.max_tokens,
             "messages": messages,
+            "response_format": {"type": "json_object"},
+            "enable_thinking": False,
+            "thinking": {"type": "disabled"},
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if "dashscope.aliyuncs.com" in self._cfg.base_url:
             payload["enable_thinking"] = False
@@ -163,6 +167,10 @@ class OpenAICompatClient:
                 "max_tokens": self._cfg.max_tokens,
                 "messages": messages
                 + [{"role": "user", "content": JSON_REPAIR_RETRY_PROMPT}],
+                "response_format": {"type": "json_object"},
+                "enable_thinking": False,
+                "thinking": {"type": "disabled"},
+                "chat_template_kwargs": {"enable_thinking": False},
             }
             if "dashscope.aliyuncs.com" in self._cfg.base_url:
                 repair_payload["enable_thinking"] = False

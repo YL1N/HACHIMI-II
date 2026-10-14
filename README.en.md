@@ -9,13 +9,18 @@
 <h1 align="center">HACHIMI-II</h1>
 
 <p align="center">
-  A meta-method repository for <b>student simulation</b>, using third-person state modeling to fight large-model <i>competence leakage</i>.
+  From role-play to <b>learner behavior modeling</b>: a student-simulation method that uses third-person prediction to counter large-model <i>competence leakage</i>.
+</p>
+
+<p align="center">
+  Paper: <i>HACHIMI-II: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation</i>
+  (<a href="paper/HACHIMI-II.pdf">PDF</a>; arXiv link to follow)
 </p>
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/Python-3.13-blue" alt="Python"></a>
-  <a href="#datasets--tasks"><img src="https://img.shields.io/badge/datasets-5-success" alt="datasets"></a>
-  <a href="#what-the-method-deliberately-avoids"><img src="https://img.shields.io/badge/paradigm-third--person%20state-orange" alt="paradigm"></a>
+  <a href="#datasets-and-tasks"><img src="https://img.shields.io/badge/datasets-5-success" alt="datasets"></a>
+  <a href="#what-the-method-deliberately-avoids"><img src="https://img.shields.io/badge/paradigm-third--person%20prediction-orange" alt="paradigm"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
 </p>
 
@@ -23,153 +28,187 @@
 
 ## What this is
 
-When you simply ask a large model to "play a student" and answer items or hold a dialogue, it tends to produce how **it** would answer — accurate, fluent, almost never making the mistakes a real student makes. The simulated "student" reproduces neither the real student's ability level nor the structure of their errors. We call this **competence leakage**.
+When you simply ask a large model to "play a student" and answer items or hold a dialogue, the role prompt describes the student but does not model what this learner knows or will do next, so the model fills the gap with **its own** competence. Simulated students then perform at a level set by the model, differ little from one another, and seldom make the errors that real students make. We call this **competence leakage**.
 
-HACHIMI-II is not a set of disjoint per-dataset scripts. It is **one unified student-simulation meta-method**, whose core claim is:
+HACHIMI-II **models the learner's behavior** and recasts student simulation as **third-person prediction** of the learner's next action:
 
-> **First model the learner as a state in the third person, then generate the current single step of learner behavior within the boundaries of that state.**
+> **First describe the learner and the learner's current state in the third person, then generate the current single step of learner behavior within the boundaries of that state.**
 
 See the contour of "Mount Lu" from outside the mountain first, then step back in to place a single stroke — instead of being "within the mountain" from the start.
 
-It is instantiated on two task families:
+It is instantiated in two settings:
 
-- **Static simulation**: single-item, single-step student answering (mathematics and natural science);
-- **Dynamic simulation**: multi-turn, step-by-step tutoring dialogue.
+- **Item-response simulation**: given a student's history and one target item, predict the student's response on that item (mathematics and natural science);
+- **Tutoring-dialogue simulation**: given a tutor-student dialogue so far, predict only the next student turn.
 
 ---
 
 ## Key results
 
-Across 5 datasets, HACHIMI-II simultaneously suppresses competence leakage and reproduces the structure of real student errors (all metrics recomputed from per-sample records).
+On five datasets, HACHIMI-II counters competence leakage and reproduces the structure of real student errors.
 
-**Static item answering** — highest correctness agreement, smallest per-student accuracy-distribution distance (W₁), highest student-ordering correlation:
+**Item response**: the highest response agreement, the smallest distance between the real and simulated distributions of per-student accuracy (W₁), and the highest student-ranking correlation.
 
-| Dataset | Agree ↑ | W₁ ↓ | Student ρ ↑ | strongest baseline W₁ |
+| Dataset | Agree ↑ | W₁ ↓ | Student ρ ↑ | Strongest baseline W₁ |
 |---|---|---|---|---|
 | XES3G5M | **0.752** | **0.039** | **0.691** | 0.327 |
 | Eedi | **0.606** | **0.046** | **0.703** | 0.119 |
 | ENEM | **0.630** | **0.169** | **0.668** | 0.409 |
 
-> Baseline simulated accuracy tracks the model's own competence, not the real students: on ENEM the real mean is ~0.39 while baselines simulate ~0.82; on XES3G5M the real mean is ~0.83 while baselines simulate ~0.50. HACHIMI-II stays close to the real level (ENEM 0.384, XES3G5M 0.828).
+> Baseline accuracy follows the model's own competence rather than the real students: on ENEM the real mean is about 0.39 while baselines simulate about 0.82; on XES3G5M the real mean is about 0.83 while baselines simulate about 0.50. HACHIMI-II tracks the real level (ENEM 0.384, XES3G5M 0.828).
 
-**Dynamic tutoring dialogue** — realized error-structure recall (SRec) several times that of the strongest baseline:
+**Tutoring dialogue**: HACHIMI-II reproduces real errors with the same knowledge type, error locus, and error mechanism 1.8× and 5.1× as often as the strongest baseline.
 
-| Dataset | SRec ↑ (HACHIMI-II) | strongest baseline SRec |
-|---|---|---|
-| Eedi QATD2k | **0.399** | ≤ 0.180 |
-| Khan/CoMTA | **0.649** | ≤ 0.113 |
+| Dataset | Rec_struct ↑ | Strongest baseline Rec_struct | F1_err ↑ | Strongest baseline F1_err |
+|---|---|---|---|---|
+| Eedi QATD2k | **0.315** | 0.172 | **0.561** | 0.248 |
+| Khan/CoMTA | **0.565** | 0.110 | **0.464** | 0.183 |
 
-> Full functional-agreement (κ_func / MCC_func), error-state (BAcc_err / MCC_err), calibration (Calib), and the three ablations (removing the persona prior / task-local state / behavior harness) are reported in the paper and its appendix.
+> Functional agreement (κ_func / MCC_func), error-state metrics (BAcc_err / MCC_err), error structure (Prec_struct / F1_struct), and the three ablations (without the persona prior, the learner state, or the behavior harness) are reported in the paper and in [`results/`](results/).
 
 ---
 
-## Datasets & tasks
+## Datasets and tasks
 
-| Modality | Directory | Dataset | Task |
-|---|---|---|---|
-| static | `static/xes/` | XES3G5M | math item-answering simulation |
-| static | `static/eedi-static/` | Eedi | math diagnostic-item simulation |
-| static | `static/enem/` | ENEM | natural-science cross-subject answering |
-| dynamic | `dynamic/eedi/` | Eedi / QATD2k | turn-by-turn tutoring-dialogue simulation |
-| dynamic | `dynamic/khan/` | Khan / CoMTA | tutoring-dialogue transfer experiment |
+| Setting | Directory | Dataset | Size | Task |
+|---|---|---|---|---|
+| Item response | `static/xes/` | XES3G5M | 60 students × 96 items | elementary math responses |
+| Item response | `static/eedi-static/` | Eedi | 480 students × 107 items | diagnostic math items |
+| Item response | `static/enem/` | ENEM 2024 | 7,200 students × 24 items | natural-science items |
+| Tutoring dialogue | `dynamic/eedi/` | Eedi QATD2k | 17,256 turns | next student turn |
+| Tutoring dialogue | `dynamic/khan/` | Khan/CoMTA | 917 turns | next student turn |
+
+The datasets are obtained from their public sources; this repository does not redistribute them. Cite the original releases:
+
+- **XES3G5M**: a large-scale knowledge-tracing benchmark of elementary math items and student response logs.
+- **Eedi**: diagnostic multiple-choice math items from the NeurIPS Education Challenge; the dialogue split uses question-anchored tutoring dialogues.
+- **ENEM 2024**: the Brazilian national exam; the natural-science (Ciências da Natureza) section is used here.
+- **Khan/CoMTA**: Khan Academy tutoring-accuracy dialogues.
+
+Place the raw data under the paths referenced by each setting's config, or point the scripts at your own copies via the corresponding arguments.
 
 ---
 
 ## Quick start
 
 ```bash
-git clone https://github.com/ZeroLoss-Lab/HACHIMII-YL.git
-cd HACHIMII-YL
-pip install -r requirements.txt   # core harness needs only the stdlib; sub-projects add deps as needed
+git clone https://github.com/YL1N/HACHIMII.git
+cd HACHIMII
+pip install -r requirements.txt
 ```
 
-Each dataset ships its own entry point, config, and reports. For example:
+The core pipeline relies on the Python standard library and talks to an OpenAI-compatible endpoint over HTTP. A few evaluation components additionally require `numpy` and `rouge_score`.
+
+All entry scripts drive an OpenAI-compatible chat-completions endpoint through three shared arguments:
 
 ```bash
-# static: XES3G5M student-answering simulation
-python static/xes/run_experiments.py
-
-# static: ENEM natural science
-python static/enem/run_enem_static_benchmark.py
-
-# dynamic: Eedi / QATD2k tutoring dialogue
-python dynamic/eedi/run_eedi_experiments.py
-
-# dynamic: Khan / CoMTA
-python dynamic/khan/run_khan_experiments.py
+--llm_base_url <https://your-endpoint/v1>
+--llm_model    <model-name>
+--llm_api_key  <api-key-or-dummy>
 ```
 
-> Generation requires an OpenAI-compatible LLM endpoint (set via each script's `--llm_base_url` / `--llm_model` / `--llm_api_key`). Run any entry point with `--help` for full arguments.
+The results in the paper use a Qwen3.5-397B backbone for simulation and a GPT-5.4 judge for evaluation, but any OpenAI-compatible model can be substituted.
+
+```bash
+# Item response: XES3G5M
+python static/xes/run_student_conditioned_benchmark.py --llm_base_url ... --llm_model ... --llm_api_key ...
+
+# Item response: Eedi / ENEM
+python static/eedi-static/run_eedi_static_benchmark.py --llm_base_url ... --llm_model ... --llm_api_key ...
+python static/enem/run_enem_static_benchmark.py        --llm_base_url ... --llm_model ... --llm_api_key ...
+
+# Tutoring dialogue: Eedi QATD2k (main pipeline)
+python dynamic/eedi/run_eedi_experiments.py --llm_base_url ... --llm_model ... --llm_api_key ...
+
+# Tutoring dialogue: Khan/CoMTA
+python dynamic/khan/run_khan_experiments.py --llm_base_url ... --llm_model ... --llm_api_key ...
+```
+
+Baselines are launched from `static/baselines/run_static_baselines.py` and `dynamic/baselines/run_dynamic_baselines.py`. Every entry script accepts `--dry_run` (or `--prepare_only`) for a no-network smoke test.
 
 ---
 
-## Repository structure
+## Repository layout
 
 ```text
-static/
-  xes/           # XES3G5M  static math item-response simulation
-  eedi-static/   # Eedi     static math diagnostic-item simulation
-  enem/          # ENEM     natural-science static cross-subject simulation
-  baselines/     # static baselines (Direct RP / Prompt-C / Profile-C)
-
-dynamic/
-  eedi/          # Eedi / QATD2k  dynamic tutoring-dialogue simulation
-  khan/          # Khan / CoMTA   dynamic tutoring-dialogue transfer experiment
-  baselines/     # dynamic baselines (+ Agent-Mem)
-
-reports/         # experiment reports & result summaries
-figures/         # figures and assets
+static/            item-response simulation
+  xes/             XES3G5M, incl. cohort preparation (item pool filter, Rasch fits)
+  eedi-static/     Eedi diagnostic items
+  enem/            ENEM 2024 natural-science items (text and text+image)
+  baselines/       item-response baselines (Direct RP / Prompt-C / Profile-C)
+dynamic/           tutoring-dialogue simulation
+  eedi/            Eedi QATD2k (main pipeline)
+  khan/            Khan/CoMTA
+  baselines/       dialogue baselines (plus Agent-Mem)
+  evaluation/      rescoring of dialogue metrics from the judge labels
+results/           metric summaries matching the paper's tables
+paper/             the paper PDF
+figures/           README assets
 ```
 
-Principles: `static/` and `dynamic/` are separated by simulation modality; each dataset keeps its own entry point, config, reports, and source; no top-level unifying wrapper; raw data, caches, and experiment outputs stay out of Git.
+Item-response and dialogue simulation are kept apart; each dataset keeps its own entry script, configs, and source; raw data, caches, and run outputs are not committed.
+
+Baselines: in item-response simulation Direct Role-Play receives the item only, Prompt-Constrained also receives the history summary, and Profile-Conditioned also receives the history summary and the student profile text. In dialogue simulation every baseline receives the question and the dialogue before the target turn; Profile-Conditioned adds a coarse profile and Agent-Style Memory adds a coarse profile and a short memory, both computed from the earlier turns.
 
 ---
 
-## The shared meta-method interface
+## The method
 
-Every instantiation shares one skeleton:
+Both settings share the same four steps:
 
 ```
-Learner Context → Task / Interaction Context → Learner-Task Fit
-                → State Layer → Harness / Constraint → Surface Realization
+student model → learner state → behavior harness compilation → harnessed generation and checking
 ```
 
-| Stage | Meaning |
+| Step | Meaning |
 |---|---|
-| `Learner Context` | who this learner is |
-| `Task / Interaction Context` | what the current task or dialogue turn is |
-| `Learner-Task Fit` | how this learner fares against this task |
-| `State Layer` | the third-person state judgment made before generation |
-| `Harness / Constraint` | translating the state into generation boundaries |
-| `Surface Realization` | the current single step of learner behavior |
+| Student model | Who the learner is: a profile summarized from the visible history, matched to a HACHIMI-1M student persona as a prior |
+| Learner state | How this learner will handle the current item or tutor turn: reachable knowledge, active error pattern, confidence, and the local interaction move |
+| Behavior harness | A fixed mapping from the state to limits on generation: accessible knowledge and reasoning depth, the error to preserve, uncertainty, response mode, and step budget |
+| Harnessed generation | Write this step of learner behavior within the harness, and regenerate it when it violates a constraint |
 
-When porting to a new task, **do not start by writing prompts**: first fix what information each slot needs, then fill it with the educational theory specific to that task.
+When transferring to a new task, **don't start by writing a prompt**: first decide which information each step needs, then fill it with the educational theory of that task.
+
+---
+
+## Results files and metric definitions
+
+| File | Contents |
+|------|----------|
+| `static_metrics.csv` | Item-response main and supplementary metrics (agreement, Wasserstein-1, per-student Spearman/Pearson, per-item correlations) for all methods. |
+| `dynamic_metrics.csv` | Dialogue main and supplementary metrics (functional-label kappa/MCC, error-state balanced accuracy/MCC/F1/kappa, error recall and precision, error-structure recall/precision/F1) for all methods. |
+| `ablation_static_metrics.csv` | Item-response ablations, with the real and simulated mean per-student accuracy and the standard deviation of simulated per-student accuracy. |
+| `ablation_dynamic_metrics.csv` | Dialogue ablations, same metrics as `dynamic_metrics.csv`. |
+| `dynamic_error_destination.csv` | Shares of real-error turns on which each simulator produces an error with matching structure, an error with different structure, or no error. |
+| `dynamic_confusion_counts.csv` | Turn counts by real and simulated functional label, from which `kappa_func` and `MCC_func` are computed. |
+
+Wasserstein-1 is the mean absolute difference between the sorted real and simulated per-student accuracies; Spearman/Pearson are the standard rank and linear correlations; the standard deviation of simulated per-student accuracy is the population standard deviation over the students.
+
+Dialogue metrics are computed from the stored judge labels by `dynamic/evaluation/rescore_dialogue_metrics.py`. `kappa_func` and `MCC_func` are Cohen's kappa and the multiclass Matthews correlation over the three functional labels. `BAcc_err`, `MCC_err`, `F1_err`, and `kappa_err` are computed over the binary error indicator. A real error counts as reproduced only when the simulated turn also contains an error and the knowledge type, error locus, and error mechanism all match: `Rec_struct` is the share of real errors reproduced, `Prec_struct` is the share of simulated errors that reproduce a real error, and `F1_struct` is their harmonic mean.
 
 ---
 
 ## Documentation
 
-| Document | Content |
+| Document | Contents |
 |---|---|
-| [`META_METHOD_GUIDE.md`](META_METHOD_GUIDE.md) | meta-method overview |
-| [`STATIC_SIMULATION_GUIDE.md`](STATIC_SIMULATION_GUIDE.md) | static simulation method |
-| [`DYNAMIC_SIMULATION_GUIDE.md`](DYNAMIC_SIMULATION_GUIDE.md) | dynamic simulation method |
-| [`AGENT_META_METHOD_PLAYBOOK.md`](AGENT_META_METHOD_PLAYBOOK.md) | Codex / agent porting playbook |
-| [`DATASET_EXPANSION_PLAN.md`](DATASET_EXPANSION_PLAN.md) | multi-dataset expansion plan |
-| [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) | project scope and boundaries |
+| [`STATIC_SIMULATION_GUIDE.md`](STATIC_SIMULATION_GUIDE.md) | Method chain, data boundaries, and per-dataset arguments for item-response simulation |
+| [`DYNAMIC_SIMULATION_GUIDE.md`](DYNAMIC_SIMULATION_GUIDE.md) | Method chain, data boundaries, and per-dataset arguments for dialogue simulation |
+| `README.md` in each subdirectory | How to run that dataset or baseline |
+| [`paper/HACHIMI-II.pdf`](paper/HACHIMI-II.pdf) | The paper; its appendix gives the prompts of the dialogue pipeline |
+
+XES3G5M is a Chinese-language dataset, so some subject, grade, module-name, and question-text string literals in `static/xes` are kept in Chinese to match the original data; comments, log messages, and descriptions are in English.
 
 ---
 
 ## What the method deliberately avoids
 
-Explicitly **out of scope**:
-
-- no direct role-play of the student;
-- no skipping the third-person state layer;
-- no putting real labels, future replies, or official evaluation annotations into the generation chain;
-- no special-casing by item id or student id;
-- no post-hoc editing of answers;
-- no piling on "make it more student-like" prompt patches to fake results.
+- Role-playing the student directly;
+- Skipping the third-person learner state;
+- Putting real labels, future turns, or official evaluation annotations into the generation chain;
+- Special-casing by item ID or student ID;
+- Post-hoc editing of answers;
+- Piling up "sound more like a student" prompt patches.
 
 ---
 
@@ -191,14 +230,25 @@ HACHIMI-II's move is to step out of the mountain first: **model the student as a
 
 ## Citation
 
-If this repository helps your research, please cite it (paper details to follow):
+If this repository helps your research, please cite it (the arXiv identifier will be added once available):
 
 ```bibtex
-@misc{hachimi2,
-  title  = {HACHIMI-II: Third-Person State Modeling for Student Simulation},
-  author = {ZeroLoss Lab},
+@misc{jiang2026hachimiii,
+  title  = {{HACHIMI-II}: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation},
+  author = {Jiang, Yilin and Tan, Fei and Yin, Xuanyu and Leng, Jing and Zhou, Aimin},
   year   = {2026},
-  note   = {https://github.com/ZeroLoss-Lab/HACHIMII-YL}
+  note   = {arXiv preprint}
+}
+```
+
+The student persona prior comes from HACHIMI-1M:
+
+```bibtex
+@inproceedings{jiang2026hachimi,
+  title     = {{HACHIMI}: Scalable and Controllable Student Persona Generation via Orchestrated Agents},
+  author    = {Jiang, Yilin and Tan, Fei and Yin, Xuanyu and Leng, Jing and Zhou, Aimin},
+  booktitle = {Findings of the Association for Computational Linguistics: ACL 2026},
+  year      = {2026}
 }
 ```
 

@@ -194,7 +194,7 @@ def _normalize_academic_level(raw_level: str) -> str:
         return "poor"
     if text.startswith("\u4f4e") or "\u524d30%\u81f350%" in text:
         return "low"
-    # Must be checked before "前10%" to avoid medium->high misclassification.
+    # Must be checked before the "top 10%" bucket to avoid medium->high misclassification.
     if text.startswith("\u4e2d") or "\u524d10%\u81f330%" in text:
         return "medium"
     if text.startswith("\u9ad8") or "\u524d10%" in text:
@@ -440,7 +440,7 @@ def _grade_to_ordinal(grade_text: str) -> int | None:
     text = (grade_text or "").strip()
     if not text:
         return None
-    # Arabic form, e.g. "3年级".
+    # Extract the Arabic-numeral grade level from the grade label.
     match = re.search(r"(\d+)", text)
     if match:
         try:

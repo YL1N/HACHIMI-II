@@ -1,261 +1,179 @@
-# 动态学生模拟方法说明
-
-## 1. 这份文档讲什么
-
-这份文档讲的是：
-
-> 当任务是“给定到当前为止的交互历史，只预测下一步学生行为”时，我们的方法应该怎么设计。
-
-这里说的是**动态模拟方法本身**，不是某次 revisit 或消融报告。
-
-在本仓库里，这套动态方法的实际落地实例是 EEDI。
-
----
-
-## 2. 动态模拟要解决什么问题
-
-动态模拟面对的不是单题一次性预测，而是逐步推进的学生交互。
-
-典型问题是：
-
-> 给定当前为止的 tutor-student 互动，学生下一步会怎么回应？
-
-这里最关键的是“下一步”。
-
-我们不想让模型一口气脑补后面很多轮，而是只关心：
-
-- tutor 这一轮刚做了什么；
-- 学生现在处在什么局部状态；
-- 这一步会推进、卡住、误解，还是部分接住；
-- 下一句学生话语会怎么把这种状态外显出来。
-
----
-
-## 3. 我们的方法不是直接从历史跳到下一句
-
-我们不做：
-
-`对话历史 -> 直接学生下一句`
-
-我们做的是：
-
-`对话历史 -> 第三人称状态 -> 生成约束 -> 当前学生回合`
-
-也就是：
-
-1. 先整理当前时点真正可见的信息；
-2. 再判断 tutor 这一轮和学生当前状态；
-3. 再把状态翻译成当前回合的生成边界；
-4. 最后只生成当前这一轮学生回复。
-
-所以它不是长 prompt 版 role-play，而是**状态推进式动态学生模拟**。
-
----
-
-## 4. 动态方法的通用骨架
-
-动态模拟的通用骨架可以写成：
-
-`StudentModel -> DialogueContext -> TutorTurnProfile -> StudentTurnState -> ConstraintBundle -> StudentTurn -> StateUpdate`
-
-它们分别回答：
-
-- `StudentModel`：这个学生比较稳定的长期特征；
-- `DialogueContext`：到当前为止，对话已经发生了什么；
-- `TutorTurnProfile`：老师这一轮到底在做什么；
-- `StudentTurnState`：学生当前这一轮最可能处在什么状态；
-- `ConstraintBundle`：这种状态下，这一轮最多能说到什么程度；
-- `StudentTurn`：当前这一轮真正说出来的话；
-- `StateUpdate`：这一轮说完之后，后续状态往哪里变。
-
-如果再抽象一点，仍然是：
-
-`Context -> State -> Constraint -> Action`
-
-其中：
-
-- `Context`：当前可见交互历史；
-- `State`：当前回合的第三人称状态；
-- `Constraint`：本回合生成边界；
-- `Action`：当前下一步学生行为。
-
----
-
-## 5. 动态方法里每一层到底在做什么
-
-### 5.1 StudentModel
-
-这一层建模的是学生长期相对稳定的部分。
-
-比如：
-
-- 基础能力；
-- 常见困惑方式；
-- 参与倾向；
-- 表达风格；
-- 面对帮助时的典型反应方式。
-
-### 5.2 DialogueContext
-
-这一层整理的是当前时点真正可见的交互上下文。
-
-它只保留：
-
-- 当前轮之前的历史；
-- 当前题目和相关元数据；
-- 当前 tutor turn；
-- 当前时点之前已经发生的学生表现。
-
-它绝对不能带进：
-
-- 真实下一句学生回复；
-- 当前轮之后的未来对话；
-- 官方评测标签；
-- 未来时点才能看到的信息。
-
-### 5.3 TutorTurnProfile
-
-这一层回答的是：
-
-- tutor 这一轮是在提示、追问、纠错还是澄清；
-- 支持强度有多大；
-- 支持颗粒度有多细；
-- tutor 当前把学生往哪个局部方向推进。
-
-它的作用是把“老师说了什么”转成“这一轮教学动作是什么”。
-
-### 5.4 StudentTurnState
-
-这一层是最关键的第三人称状态层。
-
-它回答：
-
-- 学生此刻是理解了、半懂、卡住、误解，还是犹豫；
-- 学生是否已经能接住 tutor 当前要求；
-- 如果不能接住，最可能卡在哪个局部点；
-- 当前这一轮更可能出现什么类型的外显回应。
-
-### 5.5 ConstraintBundle
-
-这一层把状态翻译成当前回合的生成边界。
-
-它规定的不是“下一句 gold 是什么”，而是：
-
-- 这一轮最多能说几句；
-- 能不能直接给完整结论；
-- 要不要保留犹豫或局部困惑；
-- 如果会错，错误应该以多强的形式外显；
-- 哪些越界行为不允许发生。
-
-### 5.6 StudentTurn
-
-最后才生成当前学生回合。
-
-它只负责把前面的状态边界外显成一句或几句学生回复。
-
-这一步只生成当前 turn，不提前生成后面很多轮。
-
-### 5.7 StateUpdate
-
-动态模拟比静态模拟多出来的一层，就是状态更新。
-
-因为这里不是“一题一锤子买卖”，所以当前回合结束后，还要考虑：
-
-- 学生是否推进了一点；
-- 是否仍然卡住；
-- 是否新暴露了某种误解；
-- 下一轮应如何衔接。
-
----
-
-## 6. 动态方法的最终实践版本
-
-在本仓库里，动态方法的实践实例是 EEDI。
-
-当前最终版不是 revisit 里某个新候选，而是保留原始 strong 主线：
-
-- `strong_population_calibrated_train200k8_structural_only`
-
-它保留的关键点是：
-
-- 第三人称状态推进链；
-- population calibration；
-- 结构化错误边界；
-- turn-level 单步生成协议。
-
-这说明一件事：
-
-> 动态方法真正必须保留的是对当前回合状态和支持关系的建模，而不是为了局部指标变化就轻易换掉主骨架。
-
----
-
-## 7. 动态方法的输入和输出
-
-### 7.1 输入
-
-动态模拟的输入通常包括：
-
-- 当前轮之前的对话历史；
-- 当前 tutor turn；
-- 题目文本；
-- 题目元数据；
-- 学科信息。
-
-### 7.2 输出
-
-动态模拟的输出通常包括：
-
-- 当前 student turn；
-- 中间状态对象；
-- tutor 回合画像；
-- 生成约束对象；
-- 后续状态更新；
-- 离线评测结果。
-
-这里中间对象同样重要，因为它们决定了：
-
-> 我们不是只拿到一句回复，而是拿到一句回复为什么这样生成的完整链路。
-
----
-
-## 8. 动态方法的边界
-
-允许：
-
-- 使用当前时点之前可见的历史；
-- 使用题目和 subject 信息；
-- 使用训练集形成群体先验；
-- 让强模型做第三人称状态判断。
-
-不允许：
-
-- 使用真实下一句学生回复；
-- 使用未来对话；
-- 使用官方标签进入生成链；
-- 跳过状态层直接生成；
-- 为了指标后处理改写学生回复。
-
----
-
-## 9. 这套动态方法适合迁移到什么任务
-
-只要你的任务满足下面这个结构，就可以套这套动态方法：
-
-- 数据本身是逐步展开的；
-- 每次只预测当前下一步局部行为；
-- 当前行为强依赖前面交互历史；
-- 同一个学生状态会在多轮里持续变化。
-
-除了 EEDI，这套方法也可以迁移到：
-
-- tutor-student 多轮辅导；
-- 多步学习过程中的学生反应预测；
-- 需要显式建模状态迁移的教育交互任务。
-
----
-
-## 10. 一句话总结
-
-动态学生模拟方法的本质是：
-
-> 先把当前交互历史整理成第三人称状态层，再把状态编译成当前回合的生成边界，最后只生成当前这一步学生行为，并在生成后更新后续状态。
+# Dynamic student simulation
+
+## Scope
+
+This note describes the method used for the *dynamic* setting: given the
+tutor-student interaction so far, predict only the next student turn. It is a
+step-by-step prediction over an unfolding dialogue rather than a one-shot
+item response. In this repository the dynamic method is instantiated on
+Eedi-QATD2k (question-anchored tutoring dialogues) and Khan/CoMTA.
+
+## What the dynamic setting predicts
+
+Given the visible dialogue up to the current point:
+
+- what the tutor just did in this turn,
+- the student's current local state,
+- whether this turn advances, stalls, misunderstands, or partially takes up the
+  support,
+- how the next student utterance externalizes that state.
+
+The emphasis is on the *next* turn. The model should not hallucinate many
+future turns at once.
+
+## Method
+
+The dynamic method does not map `dialogue history -> next student turn`
+directly. Instead it runs:
+
+```
+dialogue history -> third-person state -> generation constraints -> current student turn
+```
+
+The generic skeleton is:
+
+```
+StudentModel -> DialogueContext -> TutorTurnProfile -> StudentTurnState -> StateTransitionPrediction -> ErrorBlueprint -> ConstraintBundle -> StudentTurn
+```
+
+which abstracts to `Context -> State -> Constraint -> Action`:
+
+- `StudentModel`: the student's relatively stable long-term traits (baseline
+  ability, common confusions, engagement tendency, expression style, typical
+  reaction to help).
+- `DialogueContext`: the interaction context visible at the current point —
+  prior turns, the current item and metadata, and the current tutor turn. It
+  must not contain the real next student turn, any future dialogue, or official
+  evaluation labels.
+- `TutorTurnProfile`: what the tutor is doing this turn (hint, follow-up,
+  correction, clarification), its support strength and granularity, and the
+  local direction it pushes the student.
+- `StudentTurnState`: the core third-person state layer — whether the student
+  currently understands, half-understands, is stuck, misunderstands, or
+  hesitates; whether the student can take up the current tutor request; and, if
+  not, the most likely local sticking point.
+- `StateTransitionPrediction`: the state predicted for the next student turn
+  given the current tutor turn — whether the student advances, remains stuck,
+  or keeps a misconception.
+- `ErrorBlueprint`: the predicted error of the next turn — its presence, locus,
+  mechanism, and faulty rule.
+- `ConstraintBundle`: the predicted state and error translated into this turn's
+  generation boundaries — how much may be said, whether a full conclusion is
+  allowed, whether hesitation or local confusion is retained, how strongly an
+  error should surface, and which out-of-bounds behaviours are disallowed. The
+  translation is a fixed rule-based mapping.
+- `StudentTurn`: the current student turn, generated for this turn only.
+
+## Data boundary
+
+Allowed in the generation path: the dialogue history visible before the current
+turn, the item and subject information, a persona prior matched from
+HACHIMI-1M, and third-person state judgments over the above.
+
+Not allowed in the generation path: the real next student turn, future
+dialogue, official labels, or any post-hoc rewriting of the student turn to move
+a metric. The generation path never skips the state layer to role-play
+directly.
+
+## Inputs and outputs
+
+Inputs: prior dialogue, the current tutor turn, item text and metadata, and
+subject information.
+
+Outputs: the current student turn plus the intermediate objects (tutor-turn
+profile, student-turn state, state-transition prediction, error blueprint,
+constraint bundle) and the offline evaluation result. Each record in
+`predictions.jsonl` stores them under `student_context_profile`,
+`dialogue_context`, `tutor_turn_profile`, `interaction_state`,
+`state_transition_prediction`, `error_blueprint`, and `constraint_bundle`,
+next to `draft_turn`, `pred_turn`, `violation_check`, `surface_realization`,
+`semantic_preservation`, and the run flags in `revisit_flags`. As in the static setting, the intermediate objects make the
+full chain auditable.
+
+## Running it
+
+The dynamic entry scripts live under `dynamic/`. Each takes an
+OpenAI-compatible endpoint via `--llm_base_url`, `--llm_model`, and
+`--llm_api_key`. The next section lists the run configuration of each reported
+run:
+
+- `dynamic/eedi/` — the main dynamic pipeline (student-context profile,
+  task-local learner state, state-transition prediction, behavior harness,
+  single-step generation, dynamic violation check, optional one-step retry). It
+  supports a HACHIMI-1M persona prior; see Appendix A (Persona Matching) in the paper.
+- `dynamic/khan/` — Khan/CoMTA tutoring dialogues.
+- `dynamic/baselines/` — Direct Role-Play, Prompt-Constrained,
+  Profile-Conditioned, and Agent-Style Memory baselines for the dynamic
+  setting.
+
+## Run configurations of the reported runs
+
+Run the commands from the repository root, and replace the endpoint, the API
+key, and the output directory with local values.
+
+### Eedi QATD2k, HACHIMI-II and ablations
+
+```bash
+python dynamic/eedi/run_eedi_experiments.py \
+  --config dynamic/eedi/configs/<config>.json \
+  --llm_base_url ... --llm_api_key ... --output_dir ...
+```
+
+| Run | Config |
+| --- | --- |
+| HACHIMI-II | `run_eedi_qatd2k_train_full_20260614.json` |
+| w/o Prior | `run_eedi_qatd2k_train_without_hachimi_prior_20260619.json` |
+| w/o State | `run_eedi_qatd2k_train_without_task_local_state_20260619.json` |
+| w/o Harness | `run_eedi_qatd2k_train_without_behavior_harness_20260619.json` |
+
+All four runs read `anchored-dialogues/train.csv` with `max_dialogues` 0 and
+`max_tasks` 0, which selects every dialogue and turn. They use temperature 0.2,
+`llm_max_tokens` 1200, a 240 s timeout, `constraint_profile` `default`,
+`error_blueprint_mode` `structure_only`, and `retry_until_success` with at most
+200 attempts per task. Concurrency is 80 for the full run and 48 for the
+ablations. The configs set `skip_official_eval`, which affects only an optional
+step that runs after generation. `persona_bank_path` in the configs is a
+placeholder for the local persona bank file.
+
+### Khan/CoMTA, HACHIMI-II and ablations
+
+```bash
+python dynamic/khan/run_khan_experiments.py \
+  --dataset_path dynamic/khan/CoMTA_dataset.json \
+  --ablation_mode <full|without_hachimi_prior|without_task_local_state|without_behavior_harness> \
+  --max_dialogues 0 --max_tasks 0 --max_concurrency 48 \
+  --write_full_outputs_every_n 50 \
+  --llm_model Qwen3.5-397B --llm_temperature 0.2 --llm_max_tokens 1200 \
+  --llm_timeout_s 240 --error_blueprint_mode full \
+  --retry_until_success --retry_sleep_s 0.5 --max_retry_attempts 200 \
+  --persona_bank_path <bank.jsonl> --persona_matching_top_k 8 \
+  --llm_base_url ... --llm_api_key ... --output_dir ...
+```
+
+The dataset yields 917 student turns. `error_blueprint_mode` is `full` on
+Khan/CoMTA and `structure_only` on Eedi QATD2k. With
+`--ablation_mode without_hachimi_prior` no prior reaches any stage, and the
+two prior-bank arguments can be omitted.
+
+### Baselines
+
+```bash
+python dynamic/baselines/run_dynamic_baselines.py \
+  --dataset <eedi_qatd2k|khan_comta> \
+  --baseline <direct_roleplay|strong_prompting_ess|profile_conditioned|agent_style_memory> \
+  --max_dialogues 0 --max_tasks 0 --max_concurrency 50 --max_retries 2 \
+  --temperature 0.2 --max_tokens 256 --timeout_s 180 --resume \
+  --llm_base_url ... --llm_model ... --llm_api_key ...
+```
+
+`eedi_qatd2k` reads `anchored-dialogues/train.csv`
+(`--eedi_anchored_dialogues_path`), and `khan_comta` reads
+`CoMTA_dataset.json` (`--khan_dataset_path`). `strong_prompting_ess` is the
+Prompt-Constrained baseline.
+
+## When this method transfers
+
+The dynamic method fits tasks where the data unfolds step by step, each
+prediction targets the next local behaviour, that behaviour depends strongly on
+the prior interaction, and the same student's state evolves across multiple
+turns.

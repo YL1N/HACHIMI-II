@@ -5,7 +5,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import datetime
 from pathlib import Path
 
@@ -166,7 +166,8 @@ def _build_single_student_stack(
 
 
 def _problem_profile_from_dict(row: dict[str, object]) -> ProblemRequirementProfile:
-    return ProblemRequirementProfile(**row)
+    known = {field.name for field in fields(ProblemRequirementProfile)}
+    return ProblemRequirementProfile(**{key: value for key, value in row.items() if key in known})
 
 
 def _student_model_from_dict(row: dict[str, object]) -> StudentModel:
@@ -278,7 +279,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--persona_path",
         type=str,
-        default="../merged_students_10k.jsonl",
+        default="../personas.jsonl",
     )
     parser.add_argument(
         "--question_path",
@@ -286,11 +287,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default="../XES3G5M/metadata/questions.json",
     )
     parser.add_argument("--target_grade", type=str, default="三年级")
-    parser.add_argument("--max_students", type=int, default=1000)
-    parser.add_argument("--history_size", type=int, default=20)
-    parser.add_argument("--test_size", type=int, default=10)
+    parser.add_argument("--max_students", type=int, default=60)
+    parser.add_argument("--history_size", type=int, default=30)
+    parser.add_argument("--test_size", type=int, default=96)
     parser.add_argument("--sampling_seed", type=int, default=42)
-    parser.add_argument("--fixed_cohort_path", type=str, default=None)
+    parser.add_argument("--fixed_cohort_path", type=str, default="configs/common_test_60x96_20260507.json")
     parser.add_argument(
         "--persona_source_mode",
         choices=["xes_history_plus_hachimi", "xes_history_only"],
@@ -315,7 +316,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm_api_key", type=str, default=None)
     parser.add_argument("--llm_api_key_env", type=str, default=None)
     parser.add_argument("--llm_no_auth", action="store_true")
-    parser.add_argument("--llm_timeout_s", type=float, default=120.0)
+    parser.add_argument("--llm_timeout_s", type=float, default=240.0)
     parser.add_argument("--llm_temperature", type=float, default=0.2)
     parser.add_argument("--llm_max_tokens", type=int, default=2000)
     parser.add_argument("--llm_response_format_json", action=argparse.BooleanOptionalAction, default=True)

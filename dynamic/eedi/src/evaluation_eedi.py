@@ -119,7 +119,7 @@ def export_official_eval_csv(
 
     dialogue_idx_map: dict[str, int] = {}
     next_dialogue_idx = 0
-    for split_name in ("train_gpt-4.1.csv", "val_gpt-4.1.csv", "test_gpt-4.1.csv"):
+    for split_name in ("train_annotated.csv", "val_annotated.csv", "test_annotated.csv"):
         path = annotated_eedi_dir / split_name
         if not path.exists():
             continue

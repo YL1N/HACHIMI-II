@@ -1,24 +1,29 @@
-﻿# EEDI-static Harness
+# Eedi static harness
 
-这是 EEDI 2018-2020 静态诊断题数据上的独立学生模拟 harness。
+Standalone student-simulation harness for the Eedi static diagnostic items. It
+follows the same high-level method as the XES static pipeline: build a
+third-person student state first, then generate the student answer within the
+inferred state boundary. It is not a wrapper around the XES code; it only adapts
+data loading, item format, subject fields, item images, and persona source to
+the Eedi static setting.
 
-它采用和 XES 静态主线一致的高层方法：**先做第三人称学生状态判断，再在状态边界内生成学生答案**。它不是 XES 代码的直接包装，也不是缩水版迁移；它只在数据读取、题型格式、知识点字段、OCR 文本和画像来源上做 EEDI-static 适配。
+## Default set
 
-## 默认黄金集
+- Config: `configs/eedi_static_image_age_balanced_480x107_20260526.json`
+  (the set of the reported runs)
+- Students: `480` (ages 11 and 12, `240` each)
+- Test items: `107`, answered by every selected student
+- Total tasks: `51360`
+- Strata: `poor / low / medium / high`, `120` students each
+- History: `30` non-test historical items per student (`--history_size 30`)
+  are used to build the student model.
 
-- 配置：`configs/eedi_static_common_test_676x265_text_only_clean_20260520.json`
-- 学生：`676`
-- 测试题：`265`
-- 总任务：`179140`
-- 分层：`poor/low/medium/high` 各 `169` 人
-- 历史题：每名学生至少还有 `113` 道非测试历史题，默认使用 `30` 道构建学生模型
-
-## 方法链
+## Method chain
 
 ```text
-真实非测试历史作答 + 可选 HACHIMI 原始画像
--> HACHIMI 候选排序
--> 强模型选择最匹配画像
+real non-test history + optional raw persona prior
+-> candidate persona ranking
+-> strong-model persona selection
 -> StudentModel
 -> StudentInternalSignals
 -> ProblemRequirementProfile
@@ -29,48 +34,70 @@
 -> Evaluation
 ```
 
-核心模块含义：
+Key stages:
 
-- `HACHIMI 候选排序`：只用规则做粗筛，把年龄、能力档、数学强弱和学习风格相近的画像排到前面；这一步不做最终决定。
-- `强模型选择最匹配画像`：把 EEDI 观测画像和候选 HACHIMI 的完整原始字段一起交给强模型，由强模型选择 1 个画像，并输出匹配依据、冲突依据和融合规则。
-- `StudentModel`：由非测试历史作答构建学生画像，包括强弱知识点、自我效能、SRL、control-value、engagement、response directness 和数学任务能力画像。
-- `StudentInternalSignals`：把完整学生画像压缩成后续状态层可用的内部信号。
-- `ProblemRequirementProfile`：只用 OCR 题面和 subject path 描述题目需求，不使用正确答案或经验正确率。
-- `StudentItemInteractionDecision`：判断该学生遇到该题的可达性、正确性区间、可能错误和解释上限。
-- `ItemResponseState`：确定当前作答状态、error path、commitment 和表达边界。
-- `ConstraintBundle`：把状态翻译成生成约束，并做 violation check；失败时只允许一次显式 retry。
+- Candidate persona ranking: a rule-based coarse filter that surfaces personas
+  with similar age, ability band, math strength/weakness, and learning style.
+  It does not make the final choice.
+- Strong-model persona selection: the observed Eedi profile and the full raw
+  fields of the candidate personas are given to the strong model, which selects
+  one persona and outputs its match, conflict, and fusion rationale.
+- `StudentModel`: built from non-test history — strong/weak knowledge points,
+  self-efficacy, SRL, control-value, engagement, response directness, and a math
+  task-capability profile.
+- `StudentInternalSignals`: compresses the full student model into internal
+  signals for the downstream state layers.
+- `ProblemRequirementProfile`: describes item demands from the item image and
+  the subject path only; it does not use the correct answer or empirical
+  accuracy.
+- `StudentItemInteractionDecision`: reachability, correctness band, likely
+  error, and explanation cap for this student on this item.
+- `ItemResponseState`: the current response state, error path, commitment, and
+  expression boundary.
+- `ConstraintBundle`: translates the state into generation constraints with a
+  violation check; on a violation the answer is regenerated under a tightened
+  bundle, up to `--generation_attempts` attempts in total.
 
-## 数据边界
+## Data boundary
 
-生成链路不允许使用：
+The generation path may not use:
 
-- 当前测试题的 `CorrectAnswer`
-- 当前真实学生的 `AnswerValue`
-- 当前真实学生的 `IsCorrect`
-- 当前题目的经验正确率
-- 未来作答或评测结果
+- the current item's `CorrectAnswer`
+- the current student's `AnswerValue`
+- the current student's `IsCorrect`
+- the current item's empirical accuracy
+- any future response or evaluation result
 
-允许使用：
+The generation path may use:
 
-- 非测试历史作答
-- 当前题目图片
-- 当前题目 subject path
-- HACHIMI 原始画像字段，但只能作为学生画像先验，不能覆盖 EEDI 非测试历史中已经观察到的数学能力证据
-- 由上述信息构建出的第三人称中间对象
+- non-test historical responses
+- the current item image
+- the current item subject path
+- raw persona fields, only as a student prior that cannot override the math
+  ability evidence already observed in the Eedi non-test history
+- the third-person intermediate objects built from the above
 
-## HACHIMI 画像融合
+## Persona fusion
 
-EEDI-static 的 HACHIMI 融合不是简单按年龄和能力档硬匹配。
+Persona fusion is not a hard age/ability match. The current flow is:
 
-当前流程是：
+1. Build an `eedi_observed_profile` from the Eedi non-test history (age, ability
+   band, historical accuracy, strong/weak math areas, stability signals).
+2. Rank a small set of persona candidates by rule; ranking only narrows the
+   pool.
+3. The strong model reads the full candidate personas. The persona fields are:
+   `name`, `age`, `gender`, `grade`, `developmental_stage`, `strong_subjects`,
+   `weak_subjects`, `academic_level`, `personality`, `values`,
+   `social_relationships`, `creativity`, and `mental_health`.
+4. The strong model outputs a final `HachimiMatch` with `selected_persona_id`,
+   match rationale, conflict rationale, and fusion rule.
+5. `StudentModel` receives the raw persona, the compressed persona card, and the
+   fusion rule; the downstream state layers use the fused `StudentModel`.
 
-1. 从 EEDI 非测试历史构建 `eedi_observed_profile`，包括年龄、能力档、历史正确率、强弱数学领域和学习稳定性信号。
-2. 用规则排序生成少量 HACHIMI 候选；规则只负责缩小范围，不负责最终匹配。
-3. 强模型读取完整候选画像，字段包括 `姓名`、`年龄`、`性别`、`年级`、`发展阶段`、`代理名`、`擅长科目`、`薄弱科目`、`学术水平`、`人格`、`价值观`、`社交关系`、`创造力`、`心理健康`、`_采样约束`。
-4. 强模型输出最终 `HachimiMatch`，包含 `selected_hachimi_id`、匹配依据、冲突依据和融合规则。
-5. `StudentModel` 构建时再次接收完整 `raw_hachimi_persona`、压缩画像卡片和融合规则；后续状态层使用融合后的 `StudentModel`。
-
-原则是：EEDI 非测试历史决定数学能力主证据；HACHIMI 补充学习风格、情绪调节、表达习惯、创造力和社交互动先验。若两者冲突，冲突必须保留，不允许让 HACHIMI 覆盖真实历史。
+Principle: the Eedi non-test history is the primary evidence for math ability;
+the persona only supplies priors for learning style, emotion regulation,
+expression habits, creativity, and social interaction. Where the two conflict,
+the conflict is preserved and the persona does not override the real history.
 
 ## Smoke test
 
@@ -90,40 +117,38 @@ python .\static\eedi-static\run_eedi_static_benchmark.py `
   --max_concurrency 2
 ```
 
-当前默认 `--max_tokens 1800`，因为完整 `StudentModel` 对象比较长。
+The default `--max_tokens 1800` accounts for the length of the full
+`StudentModel` object.
 
-带 HACHIMI 的运行需要强模型参与画像匹配，不能使用 `--dry_run`：
+Runs with persona fusion require the strong model for persona matching and
+cannot use `--dry_run`. The reported `full` run uses the script defaults plus
+the persona files:
 
 ```powershell
 python .\static\eedi-static\run_eedi_static_benchmark.py `
   --config_path .\static\eedi-static\configs\eedi_static_image_age_balanced_480x107_20260526.json `
+  --history_size 30 --ablation_mode full `
   --llm_base_url "<openai-compatible-base-url>/v1" `
   --llm_model "<model-name>" `
   --llm_api_key "<api-key-or-dummy>" `
+  --temperature 0.2 --max_tokens 1800 --timeout_s 240 --response_format_json `
+  --generation_attempts 4 --task_retry_attempts 2 --failure_rerun_rounds 6 `
   --hachimi_persona_paths `
-    .\data\personas_math_strong_grade5_exact_20x4_seed42.jsonl `
-    .\data\personas_math_strong_grade6_exact_20x4_seed42.jsonl
+    .\data\personas_grade5.jsonl `
+    .\data\personas_grade6.jsonl
 ```
 
-## 当前验证状态
+`--ablation_mode` selects `full`, `without_hachimi_prior`,
+`without_task_local_state`, or `without_behavior_harness`. Without
+`--hachimi_persona_paths` no persona is matched, so the `full`,
+`without_task_local_state`, and `without_behavior_harness` runs pass the persona
+files and `without_hachimi_prior` ignores them.
 
-已通过：
+## Retry behaviour
 
-- `compileall`
-- `python -m unittest discover -s static/eedi-static/tests -v`
-- `4×5` dry-run
-- `4×2` 真 LLM smoke
-- `6×6` 真 LLM 小样本复测
-- `20×20` 真 LLM 中等 smoke，已完整产出 `metrics.json`
-
-当前重试机制：
-
-- generation 层默认 `--generation_attempts 4`
-- task 层默认 `--task_retry_attempts 2`
-- 若仍失败，会写出 `failures.jsonl` 和 `predictions_partial.jsonl`，不吞错
-
-下一步建议先跑 `100×50` 或 `100×100`，再进入全量 `676×265`。
-
-最新审计报告：
-
-- `reports/eedi_static_full_xes_method_migration_audit_20260520.md`
+- Generation layer: `--generation_attempts 4` by default.
+- Task layer: `--task_retry_attempts 2` by default.
+- Run layer: failed tasks are resubmitted for up to `--failure_rerun_rounds 6`
+  further rounds; every failed attempt is logged in `failure_attempts.jsonl`.
+- On persistent failure, `failures.jsonl` is written, completed rows stay in
+  `predictions.jsonl`, and the script raises; errors are not swallowed.

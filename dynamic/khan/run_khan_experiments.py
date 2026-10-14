@@ -29,6 +29,7 @@ from run_eedi_experiments import (  # noqa: E402
 from src.data_loading import DialogueTurn, TurnPredictionTask  # noqa: E402
 from src.evaluation_eedi import write_json, write_turn_level_outputs  # noqa: E402
 from src.llm_client import LLMConfig  # noqa: E402
+from src.persona_prior import load_persona_bank  # noqa: E402
 
 
 KHAN_NO_ANCHORED_QUESTION_TEXT = (
@@ -55,9 +56,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm_base_url", type=str, default="")
     parser.add_argument("--llm_model", type=str, default="")
     parser.add_argument("--llm_api_key", type=str, default="")
+    parser.add_argument("--llm_api_key_env", type=str, default="")
     parser.add_argument("--llm_timeout_s", type=float, default=120.0)
     parser.add_argument("--llm_temperature", type=float, default=0.2)
     parser.add_argument("--llm_max_tokens", type=int, default=1200)
+    parser.add_argument("--persona_bank_path", type=str, default="")
+    parser.add_argument("--persona_matching_top_k", type=int, default=0)
     parser.add_argument(
         "--constraint_profile",
         type=str,
@@ -74,6 +78,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--disable_llm_dynamic_violation_review", action="store_true")
     parser.add_argument("--disable_generation_retry", action="store_true")
+    parser.add_argument(
+        "--ablation_mode",
+        type=str,
+        default="full",
+        choices=(
+            "full",
+            "without_hachimi_prior",
+            "without_task_local_state",
+            "without_behavior_harness",
+        ),
+    )
     parser.add_argument(
         "--student_context_profile_mode",
         type=str,
@@ -185,6 +200,7 @@ def _normalize_khan_turns(raw_turns: object, dialogue_index: int) -> list[Dialog
 
 def main() -> None:
     args = _build_parser().parse_args()
+    _resolve_llm_api_key(args)
     _require_llm_args(args)
     max_concurrency = int(args.max_concurrency or 1)
     if max_concurrency < 1:
@@ -203,6 +219,12 @@ def main() -> None:
     )
     if args.max_tasks > 0:
         tasks = tasks[: args.max_tasks]
+    persona_bank = (
+        load_persona_bank(Path(args.persona_bank_path))
+        if str(args.persona_bank_path or "").strip()
+        and int(args.persona_matching_top_k or 0) > 0
+        else []
+    )
     if args.dry_run:
         _write_run_metadata(run_dir, args, tasks, dry_run=True)
         print(f"[DryRun] tasks={len(tasks)} output_dir={run_dir}")
@@ -250,6 +272,7 @@ def main() -> None:
                 task=task,
                 llm_config=llm_config,
                 args=args,
+                persona_bank=persona_bank,
                 ground_truth_by_key=ground_truth_by_key,
                 trace_path=trace_path,
                 predictions_path=predictions_path,
@@ -270,7 +293,15 @@ def main() -> None:
             max_workers=min(max_concurrency, len(pending_tasks) or 1)
         ) as executor:
             future_map = {
-                executor.submit(_execute_task_for_runner, task, llm_config, args, retry_events_path, output_lock): task
+                executor.submit(
+                    _execute_task_for_runner,
+                    task,
+                    llm_config,
+                    args,
+                    persona_bank,
+                    retry_events_path,
+                    output_lock,
+                ): task
                 for task in pending_tasks
             }
             for future in concurrent.futures.as_completed(future_map):
@@ -305,6 +336,7 @@ def _execute_task_for_runner(
     task: TurnPredictionTask,
     llm_config: LLMConfig,
     args: argparse.Namespace,
+    persona_bank: list[object],
     retry_events_path: Path,
     output_lock: threading.Lock,
 ) -> dict[str, object]:
@@ -312,8 +344,8 @@ def _execute_task_for_runner(
         return _execute_turn_prediction_task_until_success(
             task=task,
             llm_config=llm_config,
-            population_calibration_bank=[],
-            population_calibration_top_k=0,
+            persona_bank=persona_bank,
+            persona_matching_top_k=int(args.persona_matching_top_k or 0),
             constraint_profile=str(args.constraint_profile),
             disable_llm_dynamic_violation_review=bool(args.disable_llm_dynamic_violation_review),
             disable_generation_retry=bool(args.disable_generation_retry),
@@ -322,6 +354,7 @@ def _execute_task_for_runner(
             interaction_state_mode=str(args.interaction_state_mode),
             transition_prediction_mode=str(args.transition_prediction_mode),
             error_blueprint_mode=str(args.error_blueprint_mode),
+            ablation_mode=str(args.ablation_mode),
             retry_events_path=retry_events_path,
             retry_sleep_s=float(args.retry_sleep_s),
             max_retry_attempts=int(args.max_retry_attempts or 0),
@@ -330,8 +363,8 @@ def _execute_task_for_runner(
     return _execute_turn_prediction_task(
         task=task,
         llm_config=llm_config,
-        population_calibration_bank=[],
-        population_calibration_top_k=0,
+        persona_bank=persona_bank,
+        persona_matching_top_k=int(args.persona_matching_top_k or 0),
         constraint_profile=str(args.constraint_profile),
         disable_llm_dynamic_violation_review=bool(args.disable_llm_dynamic_violation_review),
         disable_generation_retry=bool(args.disable_generation_retry),
@@ -340,6 +373,7 @@ def _execute_task_for_runner(
         interaction_state_mode=str(args.interaction_state_mode),
         transition_prediction_mode=str(args.transition_prediction_mode),
         error_blueprint_mode=str(args.error_blueprint_mode),
+        ablation_mode=str(args.ablation_mode),
     )
 
 
@@ -347,6 +381,7 @@ def _run_and_persist_task(
     task: TurnPredictionTask,
     llm_config: LLMConfig,
     args: argparse.Namespace,
+    persona_bank: list[object],
     ground_truth_by_key: dict[tuple[str, int], str],
     trace_path: Path,
     predictions_path: Path,
@@ -367,6 +402,7 @@ def _run_and_persist_task(
             task=task,
             llm_config=llm_config,
             args=args,
+            persona_bank=persona_bank,
             retry_events_path=retry_events_path,
             output_lock=output_lock,
         )
@@ -406,12 +442,16 @@ def _write_run_metadata(
             "llm_base_url": args.llm_base_url,
             "llm_model": args.llm_model,
             "llm_api_key": "***" if args.llm_api_key else "",
+            "llm_api_key_env": args.llm_api_key_env,
             "llm_timeout_s": args.llm_timeout_s,
             "llm_temperature": args.llm_temperature,
             "llm_max_tokens": args.llm_max_tokens,
+            "persona_bank_path": args.persona_bank_path,
+            "persona_matching_top_k": args.persona_matching_top_k,
             "constraint_profile": args.constraint_profile,
             "disable_llm_dynamic_violation_review": args.disable_llm_dynamic_violation_review,
             "disable_generation_retry": args.disable_generation_retry,
+            "ablation_mode": args.ablation_mode,
             "student_context_profile_mode": args.student_context_profile_mode,
             "tutor_turn_profile_mode": args.tutor_turn_profile_mode,
             "interaction_state_mode": args.interaction_state_mode,
@@ -439,6 +479,18 @@ def _write_run_metadata(
             for task in tasks[:10]
         ],
     )
+
+
+def _resolve_llm_api_key(args: argparse.Namespace) -> None:
+    env_name = str(args.llm_api_key_env or "").strip()
+    if not env_name or str(args.llm_api_key or "").strip():
+        return
+    import os
+
+    env_value = os.environ.get(env_name, "").strip()
+    if not env_value:
+        raise ValueError(f"missing required environment variable for llm_api_key: {env_name}")
+    args.llm_api_key = env_value
 
 
 def _require_llm_args(args: argparse.Namespace) -> None:

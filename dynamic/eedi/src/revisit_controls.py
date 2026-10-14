@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .error_blueprint import ErrorBlueprint
 from .student_model import StudentContextProfile
-from .student_turn_state import InteractionState
+from .student_turn_state import TaskLocalLearnerState
 from .transition import StateTransitionPrediction
 from .tutor_turn_profile import TutorTurnProfile
 
@@ -62,14 +62,14 @@ def apply_tutor_turn_profile_revisit(
 
 
 def apply_interaction_state_revisit(
-    state: InteractionState,
+    state: TaskLocalLearnerState,
     mode: str,
-) -> InteractionState:
+) -> TaskLocalLearnerState:
     if mode == "full":
         return state
     if mode != "core":
         raise ValueError(f"unsupported interaction_state_mode: {mode}")
-    return InteractionState(
+    return TaskLocalLearnerState(
         competence_position="within_zpd",
         misconception_status=state.misconception_status,
         metacognitive_regulation_state="weak_monitoring",

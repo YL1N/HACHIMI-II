@@ -8,11 +8,11 @@ from .llm_client import OpenAICompatClient
 from .problem_profile import ProblemRequirementProfile
 from .prompts import get_answer_generator_prompt, get_direct_answer_prompt
 from .response_state import (
-    ConstraintBundle,
-    ItemResponseState,
+    BehaviorHarness,
+    TaskLocalLearnerState,
     ViolationReport,
     check_violation as check_violation_rules,
-    tighten_constraints,
+    tighten_behavior_harness,
 )
 from .student_item_interaction import StudentItemInteractionDecision
 from .student_model import StudentInternalSignals, StudentModel
@@ -131,8 +131,8 @@ def _build_thinking_payload(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     interaction_decision: StudentItemInteractionDecision | None,
     question_id: str,
     question_text: str,
@@ -223,8 +223,8 @@ def _request_thinking_step(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     interaction_decision: StudentItemInteractionDecision | None,
     question_id: str,
     question_text: str,
@@ -405,8 +405,8 @@ def generate_student_answer(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     question_id: str,
     question_text: str,
     options: dict[str, str],
@@ -467,8 +467,8 @@ def generate_student_answer(
 
 def check_violation(
     answer_output: AnswerOutput,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     llm_client: OpenAICompatClient | None = None,
     enable_llm_boundary_review: bool = True,
 ) -> ViolationReport:
@@ -482,7 +482,7 @@ def check_violation(
     )
 
 
-def should_retry_once(item_state: ItemResponseState, violation: ViolationReport) -> bool:
+def should_retry_once(item_state: TaskLocalLearnerState, violation: ViolationReport) -> bool:
     if not violation.has_violation:
         return False
     # Unreachable states and high-severity cases are unlikely to benefit from one more try.
@@ -497,8 +497,8 @@ def retry_with_tighter_constraints(
     student_model: StudentModel,
     internal_signals: StudentInternalSignals | dict[str, str] | None,
     problem_profile: ProblemRequirementProfile,
-    item_state: ItemResponseState,
-    constraints: ConstraintBundle,
+    item_state: TaskLocalLearnerState,
+    constraints: BehaviorHarness,
     question_id: str,
     question_text: str,
     options: dict[str, str],
@@ -506,8 +506,8 @@ def retry_with_tighter_constraints(
     response_persona: str = "first",
     max_thinking_steps: int = 12,
     llm_client: OpenAICompatClient | None = None,
-) -> tuple[AnswerOutput, ConstraintBundle]:
-    tightened = tighten_constraints(item_state=item_state, constraints=constraints)
+) -> tuple[AnswerOutput, BehaviorHarness]:
+    tightened = tighten_behavior_harness(item_state=item_state, constraints=constraints)
     retried_output = generate_student_answer(
         student_model=student_model,
         internal_signals=internal_signals,

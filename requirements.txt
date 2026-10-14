@@ -1,2 +1,8 @@
-# Minimal harness currently uses Python standard library only.
-
+# The core student-simulation harness uses only the Python standard library and
+# talks to an OpenAI-compatible endpoint over urllib.
+#
+# The following third-party packages are required for specific components:
+#   - numpy: Rasch/IRT fitting (static/xes) and dynamic detached evaluation
+#   - rouge_score: dynamic official/detached evaluation metrics
+numpy>=1.24
+rouge_score>=0.1.2

@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-from .constraint_bundle import ConstraintBundle
+from .constraint_bundle import BehaviorHarness
 from .dialogue_context import DialogueContextState
 from .error_blueprint import ErrorBlueprint
 from .llm_client import OpenAICompatClient, require_keys
 from .prompts import SURFACE_REALIZER_SYSTEM_PROMPT
 from .student_model import StudentContextProfile
-from .student_turn_state import InteractionState
+from .student_turn_state import TaskLocalLearnerState
 from .transition import StateTransitionPrediction
 from .tutor_turn_profile import TutorTurnProfile
 
@@ -24,10 +24,10 @@ def realize_student_surface_turn(
     student_context_profile: StudentContextProfile,
     context: DialogueContextState,
     tutor_profile: TutorTurnProfile,
-    interaction_state: InteractionState,
+    interaction_state: TaskLocalLearnerState,
     transition_prediction: StateTransitionPrediction,
     error_blueprint: ErrorBlueprint,
-    constraint_bundle: ConstraintBundle,
+    constraint_bundle: BehaviorHarness,
     draft_turn: str,
     llm_client: OpenAICompatClient,
 ) -> SurfaceRealizedTurn:

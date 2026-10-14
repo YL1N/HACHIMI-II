@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import json
@@ -39,6 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--embedding_timeout_s", type=float, default=None)
     parser.add_argument("--embedding_max_retries", type=int, default=-1)
     parser.add_argument("--embedding_retry_sleep_s", type=float, default=None)
+    parser.add_argument("--disable_embedding_similarity", action="store_true")
     return parser
 
 
@@ -73,6 +74,10 @@ def main() -> None:
         args.embedding_max_retries = 3
     if args.embedding_retry_sleep_s is None:
         args.embedding_retry_sleep_s = 2.0
+    if args.disable_embedding_similarity:
+        args.embedding_api_base_url = ""
+        args.embedding_model = ""
+        args.embedding_api_key = ""
 
     input_file = resolve_eedi_path(args.input_file)
     if not input_file.exists():
