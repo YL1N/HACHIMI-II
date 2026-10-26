@@ -19,11 +19,13 @@ if __package__ in {None, ""}:
     from static.baselines.dataset_adapters import Example, build_prompt_payload, load_examples
     from static.baselines.llm_io import LLMConfig, LLMJSONError, call_openai_compatible_json
     from static.baselines.prompt_builders import build_prompt_messages, write_prompt_templates
+    from static.xes.src.evaluation import is_prediction_correct
 else:
     from .baseline_specs import BASELINE_NAMES, DATASET_NAMES, get_baseline_spec
     from .dataset_adapters import Example, build_prompt_payload, load_examples
     from .llm_io import LLMConfig, LLMJSONError, call_openai_compatible_json
     from .prompt_builders import build_prompt_messages, write_prompt_templates
+    from ..xes.src.evaluation import is_prediction_correct
 
 
 def run_baseline(
@@ -239,8 +241,17 @@ def _run_one(
     student_response = str(parsed["student_response"]).strip()
     violation = _has_format_violation(predicted_answer, example.answer_space)
     violation_report = _violation_report(predicted_answer, example.answer_space)
-    pred_is_correct = _answer_equal(predicted_answer, example.correct_answer)
-    matches_real_answer = _answer_equal(predicted_answer, example.real_answer)
+    has_options = bool(example.answer_space and example.answer_space != ["free_text"])
+    pred_is_correct = is_prediction_correct(
+        predicted_answer=predicted_answer,
+        gold_answers=[example.correct_answer],
+        has_options=has_options,
+    )
+    matches_real_answer = is_prediction_correct(
+        predicted_answer=predicted_answer,
+        gold_answers=[example.real_answer],
+        has_options=has_options,
+    )
     prediction = {
         "baseline_name": baseline,
         "baseline_family": baseline_family,
@@ -311,8 +322,15 @@ def _violation_report(predicted_answer: str, answer_space: list[str]) -> dict[st
     if not predicted_answer.strip():
         violations.append("empty_predicted_answer")
     if answer_space and answer_space != ["free_text"]:
-        normalized_space = {_normalize_answer(answer) for answer in answer_space}
-        if _normalize_answer(predicted_answer) not in normalized_space:
+        in_space = any(
+            is_prediction_correct(
+                predicted_answer=predicted_answer,
+                gold_answers=[opt],
+                has_options=True,
+            )
+            for opt in answer_space
+        )
+        if not in_space:
             violations.append("predicted_answer_outside_answer_space")
     return {"has_violation": bool(violations), "violation_types": violations}
 
@@ -328,11 +346,11 @@ def _sha256(text: str) -> str:
 
 
 def _answer_equal(left: str, right: str) -> bool:
-    return _normalize_answer(left) == _normalize_answer(right)
-
-
-def _normalize_answer(value: str) -> str:
-    return str(value).replace("$$", "").strip().upper()
+    return is_prediction_correct(
+        predicted_answer=left,
+        gold_answers=[right],
+        has_options=False,
+    )
 
 
 def _rate(values: list[bool]) -> float | None:
@@ -447,7 +465,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm_model", required=True)
     parser.add_argument("--llm_api_key", default="")
     parser.add_argument("--temperature", type=float, default=0.2)
-    parser.add_argument("--max_tokens", type=int, default=256)
+    parser.add_argument("--max_tokens", type=int, default=800)
     parser.add_argument("--timeout_s", type=float, default=180.0)
     parser.add_argument("--max_students", type=int, default=None)
     parser.add_argument("--max_items", type=int, default=None)

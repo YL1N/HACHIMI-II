@@ -119,7 +119,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--llm_model", type=str, default="")
     parser.add_argument("--llm_api_key", type=str, default="")
     parser.add_argument("--temperature", type=float, default=0.2)
-    parser.add_argument("--max_tokens", type=int, default=160)
+    parser.add_argument("--max_tokens", type=int, default=1200)
     parser.add_argument("--timeout_s", type=float, default=120.0)
     parser.add_argument("--max_dialogues", type=int, default=10)
     parser.add_argument("--max_tasks", type=int, default=0)

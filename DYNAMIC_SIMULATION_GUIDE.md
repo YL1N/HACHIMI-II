@@ -162,7 +162,7 @@ python dynamic/baselines/run_dynamic_baselines.py \
   --dataset <eedi_qatd2k|khan_comta> \
   --baseline <direct_roleplay|strong_prompting_ess|profile_conditioned|agent_style_memory> \
   --max_dialogues 0 --max_tasks 0 --max_concurrency 50 --max_retries 2 \
-  --temperature 0.2 --max_tokens 256 --timeout_s 180 --resume \
+  --temperature 0.2 --max_tokens 1200 --timeout_s 180 --resume \
   --llm_base_url ... --llm_model ... --llm_api_key ...
 ```
 
@@ -170,6 +170,39 @@ python dynamic/baselines/run_dynamic_baselines.py \
 (`--eedi_anchored_dialogues_path`), and `khan_comta` reads
 `CoMTA_dataset.json` (`--khan_dataset_path`). `strong_prompting_ess` is the
 Prompt-Constrained baseline.
+
+## Evaluation pipeline
+
+All methods share the same evaluation pipeline. After generation, each method's
+output goes through the same three steps:
+
+1. **Export**: Convert `predictions.jsonl` to the judge input format by joining
+   with annotated EEDI data.
+
+   ```bash
+   python dynamic/evaluation/export_eval_input.py \
+     --run_dir <any_method_output_dir> \
+     --annotated_eedi_dir external/sim-student-eval/data/annotated/eedi
+   ```
+
+   This works identically for HACHIMI-II, ablations, and baselines.
+
+2. **Judge**: Run the GPT-5.4 judge on the exported CSV.
+
+   ```bash
+   python dynamic/eedi/run_detached_eval.py \
+     --input_file <run_dir>/official_eval_input.csv \
+     --config dynamic/eedi/configs/run_local.json
+   ```
+
+3. **Rescore**: Compute the reported metrics from the stored judge labels.
+
+   ```bash
+   python dynamic/evaluation/rescore_dialogue_metrics.py \
+     --root <results_dir>
+   ```
+
+   The results directory must follow `<root>/<dataset>/<method>/eval_results.jsonl`.
 
 ## When this method transfers
 

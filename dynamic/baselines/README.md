@@ -62,7 +62,9 @@ Each run writes:
 
 Only basic run metrics are computed here (`n_records`, `n_dialogues`,
 `n_empty_outputs`, `violation_rate`, `retry_rate`). The metrics reported in the
-paper are computed downstream from the stored judge labels by
+paper are computed downstream by the shared evaluation pipeline: export via
+`dynamic/evaluation/export_eval_input.py`, judge via
+`dynamic/eedi/run_detached_eval.py`, then rescore via
 `dynamic/evaluation/rescore_dialogue_metrics.py`.
 
 ## Baseline rationale

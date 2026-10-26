@@ -15,17 +15,10 @@ def norm_f(x):
     return x if x in ("correct","incorrect") else "na"
 
 def parse(r):
-    if "official_gt_correctness_label" in r:  # official format
-        f, fh = norm_f(r["official_gt_correctness_label"]), norm_f(r["official_pred_correctness_label"])
-        e, eh = bool(r.get("gold_has_codable_math_error")), bool(r.get("pred_has_codable_math_error"))
-        g, p = r.get("gold_code") or {}, r.get("pred_code") or {}
-        lab = [(g.get(k), p.get(k)) for k in ("knowledge_type","error_locus","error_mechanism")]
-    else:
-        f, fh = norm_f(r["real_function"]), norm_f(r["candidate_function"])
-        e, eh = bool(r["real_has_codable_error"]), bool(r["candidate_has_codable_error"])
-        lab = [(r["real_knowledge_type"], r["candidate_knowledge_type"]),
-               (r["real_error_locus"], r["candidate_error_locus"]),
-               (r["real_error_mechanism"], r["candidate_error_mechanism"])]
+    f, fh = norm_f(r["official_gt_correctness_label"]), norm_f(r["official_pred_correctness_label"])
+    e, eh = bool(r.get("gold_has_codable_math_error")), bool(r.get("pred_has_codable_math_error"))
+    g, p = r.get("gold_code") or {}, r.get("pred_code") or {}
+    lab = [(g.get(k), p.get(k)) for k in ("knowledge_type","error_locus","error_mechanism")]
     return f, fh, e, eh, lab
 
 def kappa_mcc(C):

@@ -70,7 +70,7 @@ For real LLM calls, pass an OpenAI-compatible `/chat/completions` base URL. For
 Eedi-static and ENEM, samples with an `image_path` are sent as a vision payload;
 XES sends text only.
 
-The reported runs use the script defaults `--temperature 0.2 --max_tokens 256
+The reported runs use the script defaults `--temperature 0.2 --max_tokens 800
 --timeout_s 180 --max_retries 2` on the full cohorts (no `--max_students` or
 `--max_items`): XES 60 x 96, Eedi-static 480 x 107, ENEM-CN 7,200 x 24.
 
