@@ -14,10 +14,11 @@
 
 <p align="center">
   Paper: <i>HACHIMI-II: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation</i>
-  (<a href="paper/HACHIMI-II.pdf">PDF</a>; arXiv link to follow)
+  (<a href="https://arxiv.org/abs/2610.19654">arXiv</a> · <a href="paper/HACHIMI-II.pdf">PDF</a>)
 </p>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2610.19654"><img src="https://img.shields.io/badge/arXiv-2610.19654-b31b1b" alt="arXiv"></a>
   <a href="#quick-start"><img src="https://img.shields.io/badge/Python-3.13-blue" alt="Python"></a>
   <a href="#datasets-and-tasks"><img src="https://img.shields.io/badge/datasets-5-success" alt="datasets"></a>
   <a href="#what-the-method-deliberately-avoids"><img src="https://img.shields.io/badge/paradigm-third--person%20prediction-orange" alt="paradigm"></a>
@@ -230,14 +231,14 @@ HACHIMI-II's move is to step out of the mountain first: **model the student as a
 
 ## Citation
 
-If this repository helps your research, please cite it (the arXiv identifier will be added once available):
+If this repository helps your research, please cite it:
 
 ```bibtex
-@misc{jiang2026hachimiii,
-  title  = {{HACHIMI-II}: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation},
-  author = {Jiang, Yilin and Tan, Fei and Yin, Xuanyu and Leng, Jing and Zhou, Aimin},
-  year   = {2026},
-  note   = {arXiv preprint}
+@article{jiang2026hachimiii,
+  title   = {{HACHIMI-II}: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation},
+  author  = {Jiang, Yilin and Tan, Fei and Yin, Xuanyu and Leng, Jing and Zhou, Aimin},
+  journal = {arXiv preprint arXiv:2610.19654},
+  year    = {2026}
 }
 ```
 

@@ -14,10 +14,11 @@
 
 <p align="center">
   论文：<i>HACHIMI-II: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation</i>
-  （<a href="paper/HACHIMI-II.pdf">PDF</a>，arXiv 链接公布后补充）
+  （<a href="https://arxiv.org/abs/2610.19654">arXiv</a> · <a href="paper/HACHIMI-II.pdf">PDF</a>）
 </p>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2610.19654"><img src="https://img.shields.io/badge/arXiv-2610.19654-b31b1b" alt="arXiv"></a>
   <a href="#快速开始"><img src="https://img.shields.io/badge/Python-3.13-blue" alt="Python"></a>
   <a href="#数据集与任务"><img src="https://img.shields.io/badge/datasets-5-success" alt="datasets"></a>
   <a href="#方法边界"><img src="https://img.shields.io/badge/paradigm-third--person%20prediction-orange" alt="paradigm"></a>
@@ -201,14 +202,14 @@ HACHIMI-II 的做法，是先跳出山来：**第三人称地把学生建模成�
 
 ## 引用
 
-如果本仓库对你的研究有帮助，欢迎引用（arXiv 编号公布后更新）：
+如果本仓库对你的研究有帮助，欢迎引用：
 
 ```bibtex
-@misc{jiang2026hachimiii,
-  title  = {{HACHIMI-II}: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation},
-  author = {Jiang, Yilin and Tan, Fei and Yin, Xuanyu and Leng, Jing and Zhou, Aimin},
-  year   = {2026},
-  note   = {arXiv preprint}
+@article{jiang2026hachimiii,
+  title   = {{HACHIMI-II}: From Role-Play to Learner Behavior Modeling for Faithful Student Simulation},
+  author  = {Jiang, Yilin and Tan, Fei and Yin, Xuanyu and Leng, Jing and Zhou, Aimin},
+  journal = {arXiv preprint arXiv:2610.19654},
+  year    = {2026}
 }
 ```
 
